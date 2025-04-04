@@ -995,6 +995,197 @@ def render_upload_file():
         
         for method, description in methods_info.items():
             st.markdown(f"**{method}**: {description}")
+def render_file_permissions():
+    """Render the file permissions and sharing management section"""
+    st.markdown("## File Permissions & Sharing")
+    
+    # Get user's files
+    user_files = st.session_state.users[st.session_state.username]["files"]
+    
+    if not user_files:
+        st.info("You haven't uploaded any files yet. Upload files to manage their permissions.")
+        return
+    
+    # Create tabs for shared by me and shared with me
+    tab1, tab2 = st.tabs(["Files Shared By Me", "Files Shared With Me"])
+    
+    with tab1:
+        # Get list of files shared by the user
+        shared_by_me = {}
+        
+        # Collect all files shared by the current user
+        for username, user_data in st.session_state.users.items():
+            if username == st.session_state.username:
+                continue
+                
+            for file_id, file_info in user_data["shared_files"].items():
+                if file_info["shared_by"] == st.session_state.username:
+                    if file_id not in shared_by_me:
+                        shared_by_me[file_id] = {
+                            "filename": file_info["filename"],
+                            "shared_with": []
+                        }
+                    shared_by_me[file_id]["shared_with"].append(username)
+        
+        if not shared_by_me:
+            st.info("You haven't shared any files with other users yet.")
+        else:
+            st.markdown("### Files You've Shared")
+            
+            for file_id, share_info in shared_by_me.items():
+                with st.expander(f"{share_info['filename']} (Shared with {len(share_info['shared_with'])} users)"):
+                    st.markdown("#### Shared with:")
+                    
+                    for username in share_info["shared_with"]:
+                        col1, col2 = st.columns([3, 1])
+                        
+                        with col1:
+                            st.markdown(f"- **{username}**")
+                        
+                        with col2:
+                            if st.button("Revoke Access", key=f"revoke_{file_id}_{username}"):
+                                # Remove file from user's shared files
+                                if file_id in st.session_state.users[username]["shared_files"]:
+                                    del st.session_state.users[username]["shared_files"][file_id]
+                                    
+                                    # Log the action
+                                    log_security_event(
+                                        st.session_state.username,
+                                        "permission_change",
+                                        f"Revoked access to {share_info['filename']} from {username}"
+                                    )
+                                    
+                                    st.success(f"Access revoked for {username}")
+                                    st.rerun()
+        
+        # Share a new file section
+        st.markdown("### Share a New File")
+        
+        # File selection
+        file_options = [(file_id, file_info["filename"]) for file_id, file_info in user_files.items()]
+        selected_file_id = None
+        
+        if file_options:
+            selected_file = st.selectbox(
+                "Select a file to share",
+                options=file_options,
+                format_func=lambda x: x[1]
+            )
+            selected_file_id = selected_file[0]
+            
+            # User selection (exclude current user)
+            available_users = [user for user in st.session_state.users.keys() if user != st.session_state.username]
+            
+            if available_users:
+                selected_user = st.selectbox(
+                    "Select a user to share with",
+                    options=available_users
+                )
+                
+                # Check if file is already shared with this user
+                already_shared = False
+                if selected_user in st.session_state.users:
+                    if selected_file_id in st.session_state.users[selected_user]["shared_files"]:
+                        already_shared = True
+                        st.warning(f"This file is already shared with {selected_user}")
+                
+                if not already_shared:
+                    # Share button
+                    if st.button("Share File"):
+                        # Get file info
+                        file_info = user_files[selected_file_id]
+                        
+                        # Add to user's shared files
+                        st.session_state.users[selected_user]["shared_files"][selected_file_id] = {
+                            "filename": file_info["filename"],
+                            "encryption": file_info["encryption"],
+                            "encrypted_data": file_info["encrypted_data"],
+                            "encryption_info": file_info["encryption_info"],
+                            "shared_by": st.session_state.username,
+                            "shared_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        }
+                        
+                        # Log the action
+                        log_security_event(
+                            st.session_state.username,
+                            "file_share",
+                            f"Shared file {file_info['filename']} with {selected_user}"
+                        )
+                        
+                        # Update access history
+                        st.session_state.users[st.session_state.username]["access_history"].append({
+                            "file_id": selected_file_id,
+                            "action": "share",
+                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        })
+                        
+                        st.success(f"File shared successfully with {selected_user}")
+                        st.rerun()
+            else:
+                st.info("There are no other users to share files with.")
+    
+    with tab2:
+        # Display files shared with the current user
+        shared_files = st.session_state.users[st.session_state.username]["shared_files"]
+        
+        if not shared_files:
+            st.info("No files have been shared with you yet.")
+        else:
+            st.markdown("### Files Shared With You")
+            
+            # Create a search box
+            search_query = st.text_input("Search shared files", "", key="search_shared_files")
+            
+            # Filter files based on search query
+            if search_query:
+                shared_files = {k: v for k, v in shared_files.items() if search_query.lower() in v["filename"].lower()}
+            
+            # Create columns for the grid
+            cols = st.columns(3)
+            
+            for i, (file_id, file_info) in enumerate(shared_files.items()):
+                with cols[i % 3]:
+                    st.markdown(f"""
+                    <div class="file-card">
+                        <h3>{file_info['filename']}</h3>
+                        <p>Shared by: {file_info['shared_by']}</p>
+                        <p>Encryption: <span class="{file_info['encryption'].lower()}-badge encryption-badge">{file_info['encryption']}</span></p>
+                        <p>Shared on: {file_info['shared_date']}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Download button
+                    if st.button(f"Download", key=f"download_shared_{file_id}"):
+                        try:
+                            # Decrypt the file
+                            decrypted_data = decrypt_file(
+                                file_info['encrypted_data'],
+                                file_info['encryption_info'],
+                                file_info['encryption']
+                            )
+                            
+                            # Create download link
+                            b64 = base64.b64encode(decrypted_data).decode()
+                            mime_type = "application/octet-stream"
+                            href = f'<a href="data:{mime_type};base64,{b64}" download="{file_info["filename"]}">Download {file_info["filename"]}</a>'
+                            st.markdown(href, unsafe_allow_html=True)
+                            
+                            # Log access
+                            log_security_event(
+                                st.session_state.username,
+                                "file_access",
+                                f"Downloaded shared file: {file_info['filename']}"
+                            )
+                            
+                            # Update access history
+                            st.session_state.users[st.session_state.username]["access_history"].append({
+                                "file_id": file_id,
+                                "action": "download",
+                                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            })
+                            
+                        except Exception as e:
+                            st.error(f"Error downloading file: {str(e)}")
 def simulate_qubit_key_generation(seed, length=32):
     """Simulate quantum key generation using qubits"""
     # In a real quantum system, this would use actual quantum hardware
