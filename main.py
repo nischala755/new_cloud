@@ -629,6 +629,147 @@ def render_dashboard():
         </div>
     </div>
     """, unsafe_allow_html=True)
+def render_my_files():
+    """Render the user's files section"""
+    st.markdown("## My Files")
+    
+    # Upload new file
+    uploaded_file = st.file_uploader("Upload a new file", type=None, key="file_uploader")
+    
+    if uploaded_file is not None:
+        # Read file data
+        file_data = uploaded_file.read()
+        
+        # Analyze file for best encryption method
+        recommended_method, reason, probabilities = analyze_file_for_encryption(file_data, uploaded_file.name)
+        
+        # Create columns for encryption options
+        st.markdown("### Encryption Options")
+        st.markdown(f"**Recommended method:** {recommended_method} - {reason}")
+        
+        # Display encryption method selection
+        selected_method = st.selectbox(
+            "Select encryption method",
+            options=ENCRYPTION_METHODS,
+            index=ENCRYPTION_METHODS.index(recommended_method)
+        )
+        
+        # Encrypt and save button
+        if st.button("Encrypt and Save"):
+            with st.spinner("Encrypting file..."):
+                # Generate a unique file ID
+                file_id = f"file_{st.session_state.file_counter}"
+                st.session_state.file_counter += 1
+                
+                # Encrypt the file
+                encrypted_data, encryption_info = encrypt_file(file_data, selected_method, file_id)
+                
+                # Save file info
+                st.session_state.users[st.session_state.username]["files"][file_id] = {
+                    "filename": uploaded_file.name,
+                    "encryption": selected_method,
+                    "encrypted_data": encrypted_data,
+                    "encryption_info": encryption_info,
+                    "upload_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "file_size": len(file_data)
+                }
+                
+                # Update access history
+                st.session_state.users[st.session_state.username]["access_history"].append({
+                    "file_id": file_id,
+                    "action": "upload",
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                })
+                
+                # Log file upload
+                log_security_event(
+                    st.session_state.username,
+                    "file_upload",
+                    f"Uploaded and encrypted file: {uploaded_file.name} using {selected_method}"
+                )
+                
+                st.success(f"File encrypted and saved successfully using {selected_method}")
+                st.rerun()
+    
+    # Display existing files
+    if not st.session_state.users[st.session_state.username]["files"]:
+        st.info("You haven't uploaded any files yet.")
+        return
+    
+    # Create a search box
+    search_query = st.text_input("Search files", "")
+    
+    # Filter files based on search query
+    files = st.session_state.users[st.session_state.username]["files"]
+    if search_query:
+        files = {k: v for k, v in files.items() if search_query.lower() in v["filename"].lower()}
+    
+    # Create columns for the grid
+    cols = st.columns(3)
+    
+    for i, (file_id, file_info) in enumerate(files.items()):
+        with cols[i % 3]:
+            st.markdown(f"""
+            <div class="file-card">
+                <h3>{file_info['filename']}</h3>
+                <p>Encryption: <span class="{file_info['encryption'].lower()}-badge encryption-badge">{file_info['encryption']}</span></p>
+                <p>Uploaded: {file_info['upload_date']}</p>
+                <p>Size: {file_info['file_size'] / 1024:.1f} KB</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # File actions
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                # Download button
+                if st.button(f"Download", key=f"download_{file_id}"):
+                    try:
+                        # Decrypt the file
+                        decrypted_data = decrypt_file(
+                            file_info['encrypted_data'],
+                            file_info['encryption_info'],
+                            file_info['encryption']
+                        )
+                        
+                        # Create download link
+                        b64 = base64.b64encode(decrypted_data).decode()
+                        mime_type = "application/octet-stream"
+                        href = f'<a href="data:{mime_type};base64,{b64}" download="{file_info["filename"]}">Download {file_info["filename"]}</a>'
+                        st.markdown(href, unsafe_allow_html=True)
+                        
+                        # Log access
+                        log_security_event(
+                            st.session_state.username,
+                            "file_access",
+                            f"Downloaded file: {file_info['filename']}"
+                        )
+                        
+                        # Update access history
+                        st.session_state.users[st.session_state.username]["access_history"].append({
+                            "file_id": file_id,
+                            "action": "download",
+                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        })
+                        
+                    except Exception as e:
+                        st.error(f"Error downloading file: {str(e)}")
+            
+            with col2:
+                # Share button
+                if st.button(f"Share", key=f"share_{file_id}"):
+                    st.session_state.selected_file = file_id
+                    st.session_state.selected_file_type = "own"
+                    st.session_state.sharing_mode = True
+                    st.rerun()
+            
+            with col3:
+                # Details button
+                if st.button(f"Details", key=f"details_{file_id}"):
+                    st.session_state.selected_file = file_id
+                    st.session_state.selected_file_type = "own"
+                    st.session_state.sharing_mode = False
+                    st.rerun()
 def simulate_qubit_key_generation(seed, length=32):
     """Simulate quantum key generation using qubits"""
     # In a real quantum system, this would use actual quantum hardware
