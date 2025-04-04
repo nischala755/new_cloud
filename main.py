@@ -770,6 +770,231 @@ def render_my_files():
                     st.session_state.selected_file_type = "own"
                     st.session_state.sharing_mode = False
                     st.rerun()
+def render_upload_file():
+    """Render the file upload section with advanced options"""
+    st.markdown("## Upload New File")
+    
+    # File uploader
+    uploaded_file = st.file_uploader("Select a file to encrypt and upload", type=None, key="upload_file_section")
+    
+    if uploaded_file is not None:
+        # Read file data
+        file_data = uploaded_file.read()
+        file_size = len(file_data)
+        
+        # Display file information
+        st.markdown(f"### File Information")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f"**Filename:** {uploaded_file.name}")
+            st.markdown(f"**Size:** {file_size / 1024:.2f} KB")
+        
+        with col2:
+            # Try to determine file type
+            file_ext = os.path.splitext(uploaded_file.name)[1].lower()
+            file_type = "Unknown"
+            
+            if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp']:
+                file_type = "Image"
+            elif file_ext in ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']:
+                file_type = "Document"
+            elif file_ext in ['.txt', '.csv', '.json', '.xml']:
+                file_type = "Text"
+            elif file_ext in ['.zip', '.rar', '.7z', '.tar', '.gz']:
+                file_type = "Archive"
+            elif file_ext in ['.mp3', '.wav', '.ogg', '.flac']:
+                file_type = "Audio"
+            elif file_ext in ['.mp4', '.avi', '.mov', '.mkv']:
+                file_type = "Video"
+            
+            st.markdown(f"**File type:** {file_type}")
+            st.markdown(f"**Extension:** {file_ext}")
+        
+        # Analyze file for best encryption method
+        recommended_method, reason, probabilities = analyze_file_for_encryption(file_data, uploaded_file.name)
+        
+        # Display encryption recommendation
+        st.markdown("### Encryption Recommendation")
+        st.markdown(f"**Recommended method:** {recommended_method}")
+        st.markdown(f"**Reason:** {reason}")
+        
+        # Display probability chart
+        st.markdown("#### Method Suitability Analysis")
+        
+        # Prepare data for the chart
+        methods = list(probabilities.keys())
+        probs = list(probabilities.values())
+        
+        # Create a bar chart using Plotly
+        fig = px.bar(
+            x=methods,
+            y=probs,
+            labels={'x': 'Encryption Method', 'y': 'Suitability Score'},
+            color=methods,
+            color_discrete_map={
+                'AES': '#4e8df5',
+                'RSA': '#f5924e',
+                'Kyber': '#4ef58d',
+                'NTRU': '#f54e8d',
+                'ChaCha20': '#9d4ef5'
+            }
+        )
+        
+        fig.update_layout(
+            title='Encryption Method Suitability',
+            xaxis_title='Method',
+            yaxis_title='Score',
+            plot_bgcolor='rgba(0,0,0,0)',
+            yaxis=dict(gridcolor='rgba(0,0,0,0.1)')
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Encryption options
+        st.markdown("### Encryption Options")
+        
+        # Method selection
+        selected_method = st.selectbox(
+            "Select encryption method",
+            options=ENCRYPTION_METHODS,
+            index=ENCRYPTION_METHODS.index(recommended_method)
+        )
+        
+        # Advanced options
+        show_advanced = st.checkbox("Show advanced options")
+        
+        if show_advanced:
+            st.markdown("#### Advanced Settings")
+            
+            # Different options based on selected method
+            if selected_method == 'AES':
+                key_size = st.select_slider(
+                    "Key size (bits)",
+                    options=[128, 192, 256],
+                    value=256
+                )
+                
+                aes_mode = st.selectbox(
+                    "AES mode",
+                    options=["CBC", "GCM", "CTR"],
+                    index=0
+                )
+                
+                st.markdown(f"""
+                **Selected configuration:**
+                - AES with {key_size}-bit key
+                - Mode: {aes_mode}
+                - {key_size/8} bytes of entropy required
+                """)
+                
+            elif selected_method == 'RSA':
+                key_size = st.select_slider(
+                    "Key size (bits)",
+                    options=[1024, 2048, 3072, 4096],
+                    value=2048
+                )
+                
+                padding_scheme = st.selectbox(
+                    "Padding scheme",
+                    options=["OAEP with SHA-256", "PKCS#1 v1.5"],
+                    index=0
+                )
+                
+                st.markdown(f"""
+                **Selected configuration:**
+                - RSA with {key_size}-bit key
+                - Padding: {padding_scheme}
+                - Hybrid encryption with AES for large files
+                """)
+                
+            elif selected_method in ['Kyber', 'NTRU']:
+                security_level = st.select_slider(
+                    "Security level",
+                    options=["Light", "Medium", "High"],
+                    value="Medium"
+                )
+                
+                st.markdown(f"""
+                **Selected configuration:**
+                - {selected_method} with {security_level} security level
+                - Post-quantum resistant
+                - Hybrid encryption with AES for data encryption
+                """)
+                
+            elif selected_method == 'ChaCha20':
+                rounds = st.select_slider(
+                    "Rounds",
+                    options=[8, 12, 20],
+                    value=20
+                )
+                
+                st.markdown(f"""
+                **Selected configuration:**
+                - ChaCha{rounds} stream cipher
+                - 256-bit key
+                - 96-bit nonce
+                """)
+        
+        # Encrypt and save button
+        if st.button("Encrypt and Save"):
+            with st.spinner("Encrypting file..."):
+                # Generate a unique file ID
+                file_id = f"file_{st.session_state.file_counter}"
+                st.session_state.file_counter += 1
+                
+                # Encrypt the file
+                encrypted_data, encryption_info = encrypt_file(file_data, selected_method, file_id)
+                
+                # Save file info
+                st.session_state.users[st.session_state.username]["files"][file_id] = {
+                    "filename": uploaded_file.name,
+                    "encryption": selected_method,
+                    "encrypted_data": encrypted_data,
+                    "encryption_info": encryption_info,
+                    "upload_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "file_size": file_size
+                }
+                
+                # Update access history
+                st.session_state.users[st.session_state.username]["access_history"].append({
+                    "file_id": file_id,
+                    "action": "upload",
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                })
+                
+                # Log file upload
+                log_security_event(
+                    st.session_state.username,
+                    "file_upload",
+                    f"Uploaded and encrypted file: {uploaded_file.name} using {selected_method}"
+                )
+                
+                # Create a Merkle tree for file integrity verification
+                file_hash = hashlib.sha256(file_data).hexdigest()
+                st.session_state.merkle_trees[file_id] = {
+                    "root_hash": file_hash,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                
+                st.success(f"File encrypted and saved successfully using {selected_method}")
+                st.rerun()
+    else:
+        # Display upload instructions
+        st.info("Select a file to upload and encrypt. The system will analyze your file and recommend the best encryption method.")
+        
+        # Display supported encryption methods
+        st.markdown("### Supported Encryption Methods")
+        
+        methods_info = {
+            "AES": "Advanced Encryption Standard - Fast symmetric encryption suitable for most files",
+            "RSA": "Rivest-Shamir-Adleman - Asymmetric encryption good for small, sensitive data",
+            "Kyber": "Post-quantum key encapsulation mechanism resistant to quantum attacks",
+            "NTRU": "Post-quantum lattice-based encryption algorithm",
+            "ChaCha20": "Modern stream cipher, faster than AES on platforms without AES hardware acceleration"
+        }
+        
+        for method, description in methods_info.items():
+            st.markdown(f"**{method}**: {description}")
 def simulate_qubit_key_generation(seed, length=32):
     """Simulate quantum key generation using qubits"""
     # In a real quantum system, this would use actual quantum hardware
