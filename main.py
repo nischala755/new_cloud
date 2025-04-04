@@ -1186,6 +1186,257 @@ def render_file_permissions():
                             
                         except Exception as e:
                             st.error(f"Error downloading file: {str(e)}")
+    def render_analytics():
+    """Render the analytics and insights section"""
+    st.markdown("## Analytics & Insights")
+    
+    # Get user's files
+    user_files = st.session_state.users[st.session_state.username]["files"]
+    
+    if not user_files:
+        st.info("You haven't uploaded any files yet. Analytics will be available once you have files.")
+        return
+    
+    # Create tabs for different analytics views
+    tab1, tab2, tab3 = st.tabs(["File Statistics", "Encryption Usage", "Security Timeline"])
+    
+    with tab1:
+        st.markdown("### File Statistics")
+        
+        # Collect data for analysis
+        file_types = {}
+        file_sizes = []
+        encryption_methods = {}
+        upload_dates = []
+        
+        for file_id, file_info in user_files.items():
+            # Get file extension
+            _, ext = os.path.splitext(file_info['filename'])
+            ext = ext.lower()
+            
+            # Count file types
+            if ext in file_types:
+                file_types[ext] += 1
+            else:
+                file_types[ext] = 1
+            
+            # Collect file sizes
+            file_sizes.append(file_info['file_size'])  # Using 'file_size' instead of 'size'
+            
+            # Count encryption methods
+            if file_info['encryption'] in encryption_methods:
+                encryption_methods[file_info['encryption']] += 1
+            else:
+                encryption_methods[file_info['encryption']] = 1
+            
+            # Collect upload dates
+            upload_dates.append(datetime.strptime(file_info['upload_date'], "%Y-%m-%d %H:%M:%S"))
+        
+        # Display file count and total storage
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Total Files", len(user_files))
+        with col2:
+            total_size_mb = sum(file_sizes) / (1024 * 1024)
+            st.metric("Total Storage", f"{total_size_mb:.2f} MB")
+        
+        # File type distribution
+        st.markdown("#### File Type Distribution")
+        if file_types:
+            fig = px.pie(
+                values=list(file_types.values()),
+                names=list(file_types.keys()),
+                title="File Types",
+                color_discrete_sequence=px.colors.qualitative.Pastel
+            )
+            fig.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # File size distribution
+        st.markdown("#### File Size Distribution")
+        if file_sizes:
+            fig = px.histogram(
+                x=file_sizes,
+                nbins=10,
+                labels={'x': 'File Size (bytes)', 'y': 'Count'},
+                title="File Size Distribution",
+                color_discrete_sequence=['#4e8df5']
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Upload activity over time
+        st.markdown("#### Upload Activity")
+        if upload_dates:
+            # Group by date
+            date_counts = {}
+            for date in upload_dates:
+                date_str = date.strftime("%Y-%m-%d")
+                if date_str in date_counts:
+                    date_counts[date_str] += 1
+                else:
+                    date_counts[date_str] = 1
+            
+            # Sort by date
+            sorted_dates = sorted(date_counts.keys())
+            
+            fig = px.line(
+                x=sorted_dates,
+                y=[date_counts[date] for date in sorted_dates],
+                labels={'x': 'Date', 'y': 'Files Uploaded'},
+                title="Upload Activity Over Time",
+                markers=True
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    
+    with tab2:
+        st.markdown("### Encryption Usage")
+        
+        # Encryption method distribution
+        st.markdown("#### Encryption Method Distribution")
+        if encryption_methods:
+            fig = px.bar(
+                x=list(encryption_methods.keys()),
+                y=list(encryption_methods.values()),
+                labels={'x': 'Encryption Method', 'y': 'Count'},
+                title="Encryption Methods Used",
+                color=list(encryption_methods.keys()),
+                color_discrete_map={
+                    'AES': '#4e8df5',
+                    'RSA': '#f5924e',
+                    'Kyber': '#4ef58d',
+                    'NTRU': '#f54e8d',
+                    'ChaCha20': '#9d4ef5'
+                }
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Encryption efficiency analysis
+        st.markdown("#### Encryption Efficiency Analysis")
+        
+        # Calculate average encryption time (simulated)
+        encryption_times = {
+            'AES': 0.05,  # seconds per MB
+            'RSA': 0.2,
+            'Kyber': 0.1,
+            'NTRU': 0.15,
+            'ChaCha20': 0.03
+        }
+        
+        # Create comparison chart
+        methods = list(encryption_times.keys())
+        times = list(encryption_times.values())
+        
+        fig = px.bar(
+            x=methods,
+            y=times,
+            labels={'x': 'Encryption Method', 'y': 'Time (seconds per MB)'},
+            title="Encryption Speed Comparison",
+            color=methods,
+            color_discrete_map={
+                'AES': '#4e8df5',
+                'RSA': '#f5924e',
+                'Kyber': '#4ef58d',
+                'NTRU': '#f54e8d',
+                'ChaCha20': '#9d4ef5'
+            }
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Security level comparison
+        st.markdown("#### Security Level Comparison")
+        
+        security_levels = {
+            'AES': 256,  # bits of security
+            'RSA': 112,  # 2048-bit RSA is roughly equivalent to 112 bits of security
+            'Kyber': 192,
+            'NTRU': 192,
+            'ChaCha20': 256
+        }
+        
+        quantum_resistance = {
+            'AES': "Moderate",
+            'RSA': "Vulnerable",
+            'Kyber': "Resistant",
+            'NTRU': "Resistant",
+            'ChaCha20': "Moderate"
+        }
+        
+        # Create a DataFrame for the comparison
+        comparison_data = {
+            'Method': methods,
+            'Security Level (bits)': [security_levels[m] for m in methods],
+            'Quantum Resistance': [quantum_resistance[m] for m in methods]
+        }
+        
+        st.dataframe(comparison_data)
+    
+    with tab3:
+        st.markdown("### Security Timeline")
+        
+        # Get user's access history
+        access_history = st.session_state.users[st.session_state.username]["access_history"]
+        
+        if not access_history:
+            st.info("No activity recorded yet.")
+        else:
+            # Create a timeline of events
+            events = []
+            
+            for entry in access_history:
+                action = entry["action"]
+                timestamp = entry["timestamp"]
+                
+                if "file_id" in entry and entry["file_id"] in user_files:
+                    filename = user_files[entry["file_id"]]["filename"]
+                    
+                    if action == "upload":
+                        description = f"Uploaded file: {filename}"
+                        icon = "📤"
+                    elif action == "download":
+                        description = f"Downloaded file: {filename}"
+                        icon = "📥"
+                    elif action == "share":
+                        description = f"Shared file: {filename}"
+                        icon = "🔗"
+                    else:
+                        description = f"Accessed file: {filename}"
+                        icon = "👁️"
+                else:
+                    description = f"Account activity: {action}"
+                    icon = "🔐"
+                
+                events.append({
+                    "timestamp": timestamp,
+                    "description": description,
+                    "icon": icon
+                })
+            
+            # Sort events by timestamp (newest first)
+            events.sort(key=lambda x: x["timestamp"], reverse=True)
+            
+            # Display timeline
+            for event in events:
+                st.markdown(f"""
+                <div class="timeline-item">
+                    <div class="timeline-icon">{event['icon']}</div>
+                    <div class="timeline-content">
+                        <p>{event['description']}</p>
+                        <p class="timeline-time">{event['timestamp']}</p>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Export button
+            if st.button("Export Security Log"):
+                # Create CSV string
+                csv_data = "Timestamp,Action,Details\n"
+                for event in events:
+                    csv_data += f"{event['timestamp']},{event['icon']},{event['description']}\n"
+                
+                # Create download link
+                b64 = base64.b64encode(csv_data.encode()).decode()
+                href = f'<a href="data:file/csv;base64,{b64}" download="security_log.csv">Download CSV</a>'
+                st.markdown(href, unsafe_allow_html=True)
 def simulate_qubit_key_generation(seed, length=32):
     """Simulate quantum key generation using qubits"""
     # In a real quantum system, this would use actual quantum hardware
