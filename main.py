@@ -485,7 +485,150 @@ def collect_entropy(data):
     st.session_state.entropy_pool.append(entropy_hash)
     if len(st.session_state.entropy_pool) > ENTROPY_POOL_SIZE:
         st.session_state.entropy_pool.pop(0)  # Remove oldest entry
-
+def render_dashboard():
+    """Render the dashboard section with user statistics and metrics"""
+    st.markdown("## Dashboard")
+    
+    # Create a multi-column layout for metrics
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        # User security score
+        user_score = st.session_state.users[st.session_state.username]["score"]
+        score_color = "#4CAF50" if user_score >= 70 else "#FFC107" if user_score >= 40 else "#F44336"
+        
+        st.markdown(f"""
+        <div class="dashboard-card">
+            <p class="metric-label">Security Score</p>
+            <h2 class="metric-value" style="color: {score_color};">{user_score}/100</h2>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        # Files count
+        files_count = len(st.session_state.users[st.session_state.username]["files"])
+        
+        st.markdown(f"""
+        <div class="dashboard-card">
+            <p class="metric-label">Your Files</p>
+            <h2 class="metric-value">{files_count}</h2>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        # Shared files count
+        shared_count = len(st.session_state.users[st.session_state.username]["shared_files"])
+        
+        st.markdown(f"""
+        <div class="dashboard-card">
+            <p class="metric-label">Shared With You</p>
+            <h2 class="metric-value">{shared_count}</h2>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Recent activity
+    st.markdown("### Recent Activity")
+    
+    # Get user's access history
+    access_history = st.session_state.users[st.session_state.username]["access_history"]
+    
+    if access_history:
+        # Display the 5 most recent activities
+        recent_activities = access_history[-5:]
+        
+        for activity in reversed(recent_activities):
+            timestamp = activity.get("timestamp", "Unknown time")
+            action = activity.get("action", "Unknown action")
+            file_id = activity.get("file_id", "Unknown file")
+            
+            # Get file name if available
+            file_name = "Unknown file"
+            if file_id in st.session_state.users[st.session_state.username]["files"]:
+                file_name = st.session_state.users[st.session_state.username]["files"][file_id]["filename"]
+            elif file_id in st.session_state.users[st.session_state.username]["shared_files"]:
+                file_name = st.session_state.users[st.session_state.username]["shared_files"][file_id]["filename"]
+            
+            # Format the activity message
+            if action == "upload":
+                icon = "📤"
+                message = f"Uploaded file: {file_name}"
+            elif action == "download":
+                icon = "📥"
+                message = f"Downloaded file: {file_name}"
+            elif action == "share":
+                icon = "🔗"
+                message = f"Shared file: {file_name}"
+            elif action == "delete":
+                icon = "🗑️"
+                message = f"Deleted file: {file_name}"
+            else:
+                icon = "🔄"
+                message = f"{action.capitalize()}: {file_name}"
+            
+            st.markdown(f"""
+            <div class="notification notification-info">
+                <div style="display: flex; justify-content: space-between;">
+                    <div>{icon} {message}</div>
+                    <div style="color: #718096; font-size: 0.9em;">{timestamp}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("No recent activity to display")
+    
+    # Encryption statistics
+    st.markdown("### Encryption Usage")
+    
+    # Prepare data for the chart
+    methods = list(st.session_state.encryption_stats.keys())
+    counts = list(st.session_state.encryption_stats.values())
+    
+    # Create a bar chart using Plotly
+    fig = px.bar(
+        x=methods,
+        y=counts,
+        labels={'x': 'Encryption Method', 'y': 'Usage Count'},
+        color=methods,
+        color_discrete_map={
+            'AES': '#4e8df5',
+            'RSA': '#f5924e',
+            'Kyber': '#4ef58d',
+            'NTRU': '#f54e8d',
+            'ChaCha20': '#9d4ef5'
+        }
+    )
+    
+    fig.update_layout(
+        title='Encryption Methods Usage',
+        xaxis_title='Encryption Method',
+        yaxis_title='Usage Count',
+        plot_bgcolor='rgba(0,0,0,0)',
+        yaxis=dict(gridcolor='rgba(0,0,0,0.1)')
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Security tips
+    st.markdown("### Security Tips")
+    
+    security_tips = [
+        "Regularly update your password to maintain account security.",
+        "Use different encryption methods for different types of files.",
+        "Enable two-factor authentication for additional security.",
+        "Regularly check your access logs for any suspicious activity.",
+        "Don't share sensitive files with users you don't trust."
+    ]
+    
+    tip_index = random.randint(0, len(security_tips) - 1)
+    
+    st.markdown(f"""
+    <div class="notification notification-warning">
+        <div style="display: flex; align-items: center;">
+            <div style="font-size: 1.5em; margin-right: 10px;">💡</div>
+            <div>{security_tips[tip_index]}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 def simulate_qubit_key_generation(seed, length=32):
     """Simulate quantum key generation using qubits"""
     # In a real quantum system, this would use actual quantum hardware
