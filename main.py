@@ -17,319 +17,37 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 import torch
 import torch.nn as nn
-from datetime import datetime
+from datetime import datetime, timedelta
 from PIL import Image
 import io
-
 import re
 import uuid
 import pickle
 from collections import defaultdict
+import zlib
+import threading
+import queue
+import plotly.express as px
+import plotly.graph_objects as go
+from typing import Dict, List, Any, Tuple, Optional, Union
+import logging
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
+import aiohttp
+from dataclasses import dataclass
+from enum import Enum
 
-#\t=True)
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger('ciphercloud')
 
-# ... existing imports ...
-
-# Add new session state variables
-if 'encryption_keys' not in st.session_state:
-    st.session_state.encryption_keys = {}
-if 'key_history' not in st.session_state:
-    st.session_state.key_history = []
-
-# Enhance encrypt_file function
-def encrypt_file(file_data, method, file_id):
-    """Enhanced encrypt file with key tracking"""
-    encryption_time = datetime.now()
-    
-    if method == 'AES':
-        key = generate_secure_key(32)
-        iv = os.urandom(16)
-        # Store key info
-        st.session_state.encryption_keys[file_id] = {
-            'method': 'AES',
-            'key': base64.b64encode(key).decode(),
-            'iv': base64.b64encode(iv).decode(),
-            'timestamp': encryption_time,
-            'key_size': len(key) * 8
-        }
-        # ... existing AES encryption code ...
-    
-    elif method == 'RSA':
-        # ... existing RSA code ...
-        st.session_state.encryption_keys[file_id] = {
-            'method': 'RSA',
-            'public_key': public_key.public_bytes(),
-            'timestamp': encryption_time,
-            'key_size': 2048
-        }
-        # ... rest of RSA code ...
-    
-    # Similar updates for Kyber and NTRU
-    # ... existing code ...
-
-# Add new function to view encryption details
-def view_encryption_details(file_id, file_info):
-    """View detailed encryption information"""
-    st.markdown("### Encryption Details")
-    
-    if file_id in st.session_state.encryption_keys:
-        key_info = st.session_state.encryption_keys[file_id]
-        
-        st.markdown(f"""
-        <div class='dashboard-card'>
-            <h4>Encryption Method: {key_info['method']}</h4>
-            <p>Key Size: {key_info['key_size']} bits</p>
-            <p>Generated: {key_info['timestamp']}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Show key preview (first few characters)
-        if 'key' in key_info:
-            key_preview = key_info['key'][:16] + "..."
-            st.code(f"Key Preview: {key_preview}")
-        
-        # Show encrypted content preview
-        if 'data' in file_info:
-            encrypted_preview = base64.b64encode(file_info['data'][:100]).decode()
-            st.markdown("#### Encrypted Content Preview")
-            st.code(encrypted_preview)
-
-# Enhance render_my_files function
-def render_my_files():
-    """Enhanced file management with encryption details"""
-    st.markdown("## My Files")
-    
-    # ... existing code ...
-    
-    for i, (file_id, file_info) in enumerate(filtered_files.items()):
-        col = cols[i % 3]
-        
-        with col:
-            # ... existing file card code ...
-            
-            # Add encryption details button
-            if st.button(f"View Encryption Details {file_id}", key=f"encrypt_details_{file_id}"):
-                view_encryption_details(file_id, file_info)
-            
-            # Enhanced sharing dialog
-            if st.button(f"Share {file_id}", key=f"share_{file_id}"):
-                show_enhanced_sharing_dialog(file_id, file_info)
-
-def show_enhanced_sharing_dialog(file_id, file_info):
-    """Enhanced file sharing with key management"""
-    st.markdown("### Share File")
-    
-    # Basic file info
-    st.markdown(f"""
-    <div class='file-card'>
-        <h4>{file_info['filename']}</h4>
-        <p>Encryption: {file_info['encryption_method']}</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Sharing options
-    other_users = [user for user in st.session_state.users.keys() 
-                  if user != st.session_state.username]
-    target_user = st.selectbox("Share with", other_users)
-    
-    # Advanced sharing options
-    sharing_options = st.expander("Advanced Sharing Options")
-    with sharing_options:
-        share_key = st.checkbox("Share encryption key", value=True)
-        expiry_days = st.number_input("Access expiry (days)", min_value=1, value=7)
-        permission = st.selectbox("Permission", ["read", "write", "full"])
-    
-    if st.button("Share"):
-        share_file_with_key(file_id, target_user, share_key, expiry_days, permission)
-        st.success(f"File shared with {target_user}")
-
-def share_file_with_key(file_id, target_user, share_key, expiry_days, permission):
-    """Share file with optional key sharing"""
-    # Get file info
-    file_info = st.session_state.users[st.session_state.username]['files'][file_id]
-    
-    # Create shared file record
-    shared_file = file_info.copy()
-    shared_file['owner'] = st.session_state.username
-    shared_file['permission'] = permission
-    shared_file['expiry'] = datetime.now() + timedelta(days=expiry_days)
-    
-    if share_key and file_id in st.session_state.encryption_keys:
-        shared_file['encryption_key'] = st.session_state.encryption_keys[file_id]
-    
-    # Add to target user's shared files
-    st.session_state.users[target_user]['shared_files'][file_id] = shared_file
-    
-    # Log sharing
-    log_file_access(file_id, st.session_state.username, 'share')
-
-# Add to render_dashboard
-def render_dashboard():
-    # ... existing dashboard code ...
-    
-    # Add encryption key statistics
-    st.markdown("### Encryption Key Statistics")
-    
-    # Count keys by method
-    key_stats = defaultdict(int)
-    for key_info in st.session_state.encryption_keys.values():
-        key_stats[key_info['method']] += 1
-    
-    # Display stats
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Key distribution chart
-        if key_stats:
-            fig, ax = plt.subplots()
-            methods = list(key_stats.keys())
-            counts = list(key_stats.values())
-            ax.bar(methods, counts)
-            ax.set_title("Encryption Methods Distribution")
-            st.pyplot(fig)
-    
-    with col2:
-        # Recent keys
-        st.markdown("#### Recent Encryption Keys")
-        recent_keys = sorted(
-            st.session_state.encryption_keys.items(),
-            key=lambda x: x[1]['timestamp'],
-            reverse=True
-        )[:5]
-        
-        for file_id, key_info in recent_keys:
-            st.markdown(f"""
-            <div style='padding: 10px; background-color: white; border-radius: 5px; margin-bottom: 10px;'>
-                <p><strong>File ID:</strong> {file_id}</p>
-                <p><strong>Method:</strong> {key_info['method']}</p>
-                <p><strong>Generated:</strong> {key_info['timestamp']}</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-# Set page configuration
-st.set_page_config(
-    page_title="CipherCloud",
-    page_icon="🔐",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Custom CSS for better UI
-st.markdown("""
-<style>
-    .main {
-        background-color: #f5f7f9;
-    }
-    .stApp {
-        max-width: 1200px;
-        margin: 0 auto;
-    }
-    .css-1d391kg {
-        padding: 1rem 1rem 1rem;
-    }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 2px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        white-space: pre-wrap;
-        background-color: #f0f2f6;
-        border-radius: 4px 4px 0 0;
-        gap: 1px;
-        padding-top: 10px;
-        padding-bottom: 10px;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #4e8df5;
-        color: white;
-    }
-    .css-1cpxqw2 {
-        border-radius: 10px;
-        padding: 1rem;
-        background-color: white;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-    }
-    .css-1v3fvcr {
-        background-color: #f5f7f9;
-    }
-    .stButton>button {
-        background-color: #4e8df5;
-        color: white;
-        border-radius: 5px;
-        border: none;
-        padding: 0.5rem 1rem;
-        font-weight: bold;
-    }
-    .stButton>button:hover {
-        background-color: #3a7bd5;
-    }
-    .file-card {
-        background-color: white;
-        border-radius: 10px;
-        padding: 15px;
-        margin-bottom: 10px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        transition: transform 0.2s;
-    }
-    .file-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    .encryption-badge {
-        display: inline-block;
-        padding: 3px 8px;
-        border-radius: 12px;
-        font-size: 0.8em;
-        font-weight: bold;
-        margin-right: 5px;
-    }
-    .aes-badge {
-        background-color: #d4f1f9;
-        color: #05a2dc;
-    }
-    .rsa-badge {
-        background-color: #ffeaa7;
-        color: #fdcb6e;
-    }
-    .kyber-badge {
-        background-color: #e3f9e5;
-        color: #27ae60;
-    }
-    .ntru-badge {
-        background-color: #f9e3e3;
-        color: #e74c3c;
-    }
-    .login-container {
-        max-width: 400px;
-        margin: 0 auto;
-        padding: 20px;
-        background-color: white;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    .centered-image {
-        display: block;
-        margin-left: auto;
-        margin-right: auto;
-    }
-    .dashboard-card {
-        background-color: white;
-        border-radius: 10px;
-        padding: 20px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        height: 100%;
-    }
-    .metric-value {
-        font-size: 2.5rem;
-        font-weight: bold;
-        color: #4e8df5;
-    }
-    .metric-label {
-        font-size: 1rem;
-        color: #718096;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Constants
+# Constants
+MAX_LOGIN_ATTEMPTS = 3
+LOGIN_COOLDOWN = 300  # seconds
+FILE_CHUNK_SIZE = 1024 * 1024  # 1MB chunks for large file handling
+ENTROPY_POOL_SIZE = 10000
+ENCRYPTION_METHODS = ['AES', 'RSA', 'Kyber', 'NTRU', 'ChaCha20']
 
 # Initialize session state variables
 if 'logged_in' not in st.session_state:
@@ -341,155 +59,528 @@ if 'users' not in st.session_state:
         "admin": {
             "password": "admin123",
             "files": {},
-            "score": 85,
             "shared_files": {},
-            "access_history": []
+            "access_history": [],
+            "score": 75
         },
         "user1": {
             "password": "user123",
             "files": {},
-            "score": 75,
             "shared_files": {},
-            "access_history": []
+            "access_history": [],
+            "score": 50
         }
     }
-if 'entropy_pool' not in st.session_state:
-    st.session_state.entropy_pool = []
 if 'file_counter' not in st.session_state:
-    st.session_state.file_counter = 0
+    st.session_state.file_counter = 1
+if 'access_logs' not in st.session_state:
+    st.session_state.access_logs = []
 if 'merkle_trees' not in st.session_state:
     st.session_state.merkle_trees = {}
 if 'nlp_permissions' not in st.session_state:
     st.session_state.nlp_permissions = {}
+if 'entropy_pool' not in st.session_state:
+    st.session_state.entropy_pool = []
 if 'encryption_stats' not in st.session_state:
     st.session_state.encryption_stats = {
         'AES': 0,
         'RSA': 0,
         'Kyber': 0,
-        'NTRU': 0
+        'NTRU': 0,
+        'ChaCha20': 0
     }
-if 'access_logs' not in st.session_state:
-    st.session_state.access_logs = []
-if 'qubit_keys' not in st.session_state:
-    st.session_state.qubit_keys = {}
+if 'dark_mode' not in st.session_state:
+    st.session_state.dark_mode = False
+if 'login_attempts' not in st.session_state:
+    st.session_state.login_attempts = {}
+if 'file_versions' not in st.session_state:
+    st.session_state.file_versions = {}
+if 'notifications' not in st.session_state:
+    st.session_state.notifications = []
+if 'activity_metrics' not in st.session_state:
+    st.session_state.activity_metrics = defaultdict(lambda: defaultdict(int))
+if 'encryption_keys' not in st.session_state:
+    st.session_state.encryption_keys = {}
+if 'key_history' not in st.session_state:
+    st.session_state.key_history = []
+if 'security_alerts' not in st.session_state:
+    st.session_state.security_alerts = []
+if 'file_comments' not in st.session_state:
+    st.session_state.file_comments = {}
+if 'user_preferences' not in st.session_state:
+    st.session_state.user_preferences = {}
 
-# File storage directory
-UPLOAD_DIR = "uploaded_files"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+# Custom CSS for enhanced UI
+def load_custom_css():
+    st.markdown("""
+    <style>
+        /* Main theme colors */
+        :root {
+            --primary-color: #4e8df5;
+            --secondary-color: #f5924e;
+            --background-color: #f9fafc;
+            --text-color: #333333;
+            --card-bg-color: white;
+            --success-color: #4CAF50;
+            --warning-color: #FFC107;
+            --danger-color: #F44336;
+        }
+        
+        /* Dark mode colors */
+        .dark-mode {
+            --primary-color: #6e9df5;
+            --secondary-color: #f5a24e;
+            --background-color: #1e1e1e;
+            --text-color: #f0f0f0;
+            --card-bg-color: #2d2d2d;
+        }
+        
+        /* Animation keyframes */
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        /* General styles */
+        .stApp {
+            background-color: var(--background-color);
+            color: var(--text-color);
+        }
+        
+        h1, h2, h3, h4, h5, h6 {
+            color: var(--primary-color);
+        }
+        
+        /* Card styles */
+        .dashboard-card, .file-card {
+            background-color: var(--card-bg-color);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            animation: fadeIn 0.5s ease-out;
+        }
+        
+        .file-card {
+            height: 100%;
+            transition: transform 0.3s ease;
+        }
+        
+        .file-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        /* Metrics */
+        .metric-label {
+            font-size: 1em;
+            color: #718096;
+            margin-bottom: 5px;
+        }
+        
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            margin: 0;
+        }
+        
+        /* Encryption badges */
+        .encryption-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: bold;
+            color: white;
+        }
+        
+        .aes-badge {
+            background-color: #4e8df5;
+        }
+        
+        .rsa-badge {
+            background-color: #f5924e;
+        }
+        
+        .kyber-badge {
+            background-color: #4ef58d;
+        }
+        
+        .ntru-badge {
+            background-color: #f54e8d;
+        }
+        
+        .chacha20-badge {
+            background-color: #9d4ef5;
+        }
+        
+        /* Login container */
+        .login-container {
+            background-color: var(--card-bg-color);
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            animation: fadeIn 1s ease-in;
+        }
+        
+        /* Notification styles */
+        .notification {
+            padding: 10px 15px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        .notification-info {
+            background-color: #e3f2fd;
+            border-left: 4px solid #2196F3;
+        }
+        
+        .notification-success {
+            background-color: #e8f5e9;
+            border-left: 4px solid #4CAF50;
+        }
+        
+        .notification-warning {
+            background-color: #fff8e1;
+            border-left: 4px solid #FFC107;
+        }
+        
+        .notification-error {
+            background-color: #ffebee;
+            border-left: 4px solid #F44336;
+        }
+        
+        /* Progress bar */
+        .stProgress > div > div {
+            background-color: var(--primary-color);
+        }
+        
+        /* Button styles */
+        .stButton>button {
+            border-radius: 5px;
+            transition: all 0.3s ease;
+        }
+        
+        .stButton>button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Table styles */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        th {
+            background-color: #f8fafc;
+            font-weight: bold;
+        }
+        
+        tr:hover {
+            background-color: #f8fafc;
+        }
+    </style>
+    """, unsafe_allow_html=True)
 
-# ================ UTILITY FUNCTIONS ================
-
-def collect_entropy(event_data):
-    """Collect entropy from user events for stronger key generation"""
-    st.session_state.entropy_pool.append(event_data)
-    if len(st.session_state.entropy_pool) > 1000:
-        st.session_state.entropy_pool = st.session_state.entropy_pool[-1000:]
+# ================ SECURITY FUNCTIONS ================
 
 def generate_secure_key(length=32):
-    """Generate a secure key using collected entropy"""
+    """Generate a secure key using entropy pool"""
     if not st.session_state.entropy_pool:
-        # Fallback if no entropy collected
+        # If entropy pool is empty, use os.urandom as fallback
         return os.urandom(length)
     
-    # Mix entropy with system randomness
-    entropy_str = ''.join(str(e) for e in st.session_state.entropy_pool)
-    seed = hashlib.sha256(entropy_str.encode() + os.urandom(16)).digest()
-    return seed[:length]
+    # Mix entropy from pool with system randomness
+    entropy_str = ''.join(random.sample(st.session_state.entropy_pool, min(100, len(st.session_state.entropy_pool))))
+    entropy_hash = hashlib.sha512((entropy_str + str(time.time())).encode()).digest()
+    
+    # Use entropy as seed for random generator
+    random.seed(entropy_hash)
+    
+    # Generate key
+    key = bytearray(length)
+    for i in range(length):
+        key[i] = random.randint(0, 255)
+    
+    # Record key generation in history
+    st.session_state.key_history.append({
+        'timestamp': datetime.now(),
+        'length': length,
+        'entropy_used': len(entropy_str)
+    })
+    
+    return bytes(key)
 
-def simulate_qubit_key_generation(file_id, length=32):
-    """Simulate quantum computing-based key generation"""
-    # Simulate quantum superposition and entanglement
-    qubits = []
-    for _ in range(length * 8):  # 8 bits per byte
-        # Simulate a qubit in superposition (0 and 1 simultaneously)
-        qubit = random.choice([0, 1])
-        qubits.append(qubit)
+def collect_entropy(data):
+    """Collect entropy for secure key generation"""
+    # Hash the input data to extract entropy
+    entropy_hash = hashlib.sha256(str(data).encode()).hexdigest()
     
-    # Simulate measurement collapsing superposition
-    measured_bits = ''.join(str(q) for q in qubits)
-    key = hashlib.sha256(measured_bits.encode()).digest()
+    # Add to entropy pool, keeping pool size limited
+    st.session_state.entropy_pool.append(entropy_hash)
+    if len(st.session_state.entropy_pool) > ENTROPY_POOL_SIZE:
+        st.session_state.entropy_pool.pop(0)  # Remove oldest entry
+
+def simulate_qubit_key_generation(seed, length=32):
+    """Simulate quantum key generation using qubits"""
+    # In a real quantum system, this would use actual quantum hardware
+    # For simulation, we'll use a deterministic but complex algorithm
     
-    # Store the key
-    st.session_state.qubit_keys[file_id] = key
-    return key
+    # Create a seed hash
+    seed_hash = hashlib.sha256(str(seed).encode()).digest()
+    
+    # Convert to numpy array for "quantum" operations
+    seed_array = np.frombuffer(seed_hash, dtype=np.uint8)
+    
+    # Simulate quantum superposition by creating a probability distribution
+    probabilities = np.sin(seed_array / 255.0 * np.pi) ** 2
+    
+    # Simulate measurement collapse
+    measurements = np.random.binomial(1, probabilities, size=length * 8)
+    
+    # Convert bit array to bytes
+    result = bytearray(length)
+    for i in range(length):
+        for j in range(8):
+            if measurements[i * 8 + j]:
+                result[i] |= (1 << j)
+    
+    return bytes(result)
+
+def check_password_strength(password):
+    """Check password strength and return a score and feedback"""
+    score = 0
+    feedback = []
+    
+    # Length check
+    if len(password) >= 12:
+        score += 25
+    elif len(password) >= 8:
+        score += 15
+        feedback.append("Consider using a longer password (12+ chars)")
+    else:
+        feedback.append("Password is too short")
+    
+    # Character variety checks
+    if re.search(r'[A-Z]', password):
+        score += 10
+    else:
+        feedback.append("Add uppercase letters")
+        
+    if re.search(r'[a-z]', password):
+        score += 10
+    else:
+        feedback.append("Add lowercase letters")
+        
+    if re.search(r'[0-9]', password):
+        score += 10
+    else:
+        feedback.append("Add numbers")
+        
+    if re.search(r'[^A-Za-z0-9]', password):
+        score += 15
+    else:
+        feedback.append("Add special characters")
+    
+    # Common patterns check
+    common_patterns = ['123', 'abc', 'qwerty', 'password', 'admin']
+    for pattern in common_patterns:
+        if pattern in password.lower():
+            score -= 10
+            feedback.append(f"Avoid common patterns like '{pattern}'")
+            break
+    
+    # Determine strength level and color
+    if score >= 70:
+        level = "Strong"
+        color = "#4CAF50"  # Green
+    elif score >= 40:
+        level = "Moderate"
+        color = "#FFC107"  # Yellow
+    else:
+        level = "Weak"
+        color = "#F44336"  # Red
+    
+    return {
+        'score': score,
+        'level': level,
+        'color': color,
+        'feedback': feedback
+    }
+
+def verify_login(username, password):
+    """Verify login credentials with rate limiting"""
+    # Check if user is locked out
+    current_time = time.time()
+    if username in st.session_state.login_attempts:
+        attempts, lockout_time = st.session_state.login_attempts[username]
+        if attempts >= MAX_LOGIN_ATTEMPTS and current_time - lockout_time < LOGIN_COOLDOWN:
+            remaining = int(LOGIN_COOLDOWN - (current_time - lockout_time))
+            logger.warning(f"Account {username} is locked. Try again in {remaining} seconds")
+            return False, f"Too many failed attempts. Try again in {remaining} seconds"
+    
+    # Verify credentials
+    if username in st.session_state.users and st.session_state.users[username]["password"] == password:
+        # Reset login attempts on successful login
+        st.session_state.login_attempts[username] = (0, current_time)
+        
+        # Log successful login
+        log_security_event(username, "login_success", "Successful login")
+        return True, "Login successful"
+    else:
+        # Increment failed login attempts
+        if username in st.session_state.login_attempts:
+            attempts, _ = st.session_state.login_attempts[username]
+            st.session_state.login_attempts[username] = (attempts + 1, current_time)
+        else:
+            st.session_state.login_attempts[username] = (1, current_time)
+        
+        # Log failed login attempt
+        log_security_event(username, "login_failure", "Failed login attempt")
+        return False, "Invalid username or password"
+
+def log_security_event(username, event_type, description):
+    """Log security events for auditing"""
+    event = {
+        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        'username': username,
+        'event_type': event_type,
+        'description': description,
+        'ip_address': '127.0.0.1'  # In a real app, get the actual IP
+    }
+    
+    st.session_state.security_alerts.append(event)
+    logger.info(f"Security event: {event_type} - {description} - User: {username}")
+
+# ================ ENCRYPTION FUNCTIONS ================
 
 def analyze_file_for_encryption(file_data, filename):
-    """AI analysis to determine the best encryption method for a file"""
+    """Analyze file to recommend best encryption method"""
+    # Extract file extension
+    _, ext = os.path.splitext(filename)
+    ext = ext.lower()
+    
+    # Get file size
     file_size = len(file_data)
-    file_extension = os.path.splitext(filename)[1].lower()
     
-    # Simple neural network to decide encryption method
-    class EncryptionSelector(nn.Module):
-        def __init__(self):
-            super(EncryptionSelector, self).__init__()
-            self.fc1 = nn.Linear(3, 10)
-            self.fc2 = nn.Linear(10, 4)
-            self.relu = nn.ReLU()
-            self.softmax = nn.Softmax(dim=0)
-            
-        def forward(self, x):
-            x = self.relu(self.fc1(x))
-            x = self.softmax(self.fc2(x))
-            return x
+    # Initialize probabilities
+    probabilities = {
+        'AES': 0.25,
+        'RSA': 0.25,
+        'Kyber': 0.25,
+        'NTRU': 0.15,
+        'ChaCha20': 0.10
+    }
     
-    # Feature extraction
-    # 1. File size (normalized)
-    size_feature = min(file_size / 10000000, 1.0)  # Normalize to 0-1 range
-    
-    # 2. File type sensitivity (based on extension)
-    sensitive_extensions = ['.pdf', '.docx', '.xlsx', '.txt', '.key']
-    medium_extensions = ['.jpg', '.png', '.mp3', '.mp4']
-    sensitivity = 0.9 if file_extension in sensitive_extensions else 0.5 if file_extension in medium_extensions else 0.3
-    
-    # 3. Content complexity (simple heuristic)
-    complexity = min(len(set(file_data[:1000])) / 256, 1.0)  # Unique byte ratio
-    
-    # Create input tensor
-    features = torch.tensor([size_feature, sensitivity, complexity], dtype=torch.float32)
-    
-    # Initialize model
-    model = EncryptionSelector()
-    
-    # Forward pass
-    with torch.no_grad():
-        output = model(features)
-    
-    # Decision logic
-    encryption_methods = ['AES', 'RSA', 'Kyber', 'NTRU']
-    probabilities = output.numpy()
-    
-    # Deterministic logic override for demo purposes
-    if file_size < 1000000:  # < 1MB
-        selected_method = 'AES'
-        reason = "Small file size, symmetric encryption is efficient"
-    elif sensitivity > 0.7:
-        selected_method = 'Kyber' if random.random() > 0.5 else 'NTRU'
-        reason = "Sensitive file content, quantum-resistant encryption recommended"
-    elif complexity > 0.7:
-        selected_method = 'RSA'
-        reason = "Complex file content, asymmetric encryption provides better security"
+    # Adjust based on file type
+    if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp']:
+        # Images - prefer symmetric encryption for speed
+        probabilities['AES'] += 0.2
+        probabilities['ChaCha20'] += 0.1
+        probabilities['RSA'] -= 0.1
+        reason = "Image files benefit from fast symmetric encryption"
+    elif ext in ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']:
+        # Documents - balanced approach
+        probabilities['AES'] += 0.1
+        probabilities['RSA'] += 0.1
+        probabilities['Kyber'] += 0.05
+        reason = "Document files need balanced security and performance"
+    elif ext in ['.txt', '.csv', '.json', '.xml']:
+        # Text files - may contain sensitive data
+        probabilities['RSA'] += 0.15
+        probabilities['Kyber'] += 0.1
+        probabilities['AES'] -= 0.05
+        reason = "Text files may contain sensitive data requiring stronger encryption"
+    elif ext in ['.zip', '.rar', '.7z', '.tar', '.gz']:
+        # Archives - already compressed, need efficient encryption
+        probabilities['AES'] += 0.15
+        probabilities['ChaCha20'] += 0.15
+        probabilities['RSA'] -= 0.1
+        reason = "Archive files need efficient encryption due to their size and structure"
+    elif ext in ['.exe', '.dll', '.so', '.bin']:
+        # Executables - need integrity protection
+        probabilities['AES'] += 0.1
+        probabilities['NTRU'] += 0.1
+        probabilities['Kyber'] += 0.05
+        reason = "Executable files need strong integrity protection"
     else:
-        # Use the model's prediction
-        selected_index = np.argmax(probabilities)
-        selected_method = encryption_methods[selected_index]
-        reason = "AI model recommendation based on file characteristics"
+        # Unknown file type - use quantum-resistant as precaution
+        probabilities['Kyber'] += 0.1
+        probabilities['NTRU'] += 0.1
+        reason = "Unknown file type, using quantum-resistant encryption as precaution"
     
-    # Update stats
-    st.session_state.encryption_stats[selected_method] += 1
+    # Adjust based on file size
+    if file_size > 10 * 1024 * 1024:  # > 10MB
+        # Large files - prefer faster encryption
+        probabilities['AES'] += 0.15
+        probabilities['ChaCha20'] += 0.1
+        probabilities['RSA'] -= 0.15
+        probabilities['NTRU'] -= 0.05
+        reason += " and fast encryption is preferred for large files"
+    elif file_size < 1024:  # < 1KB
+        # Small files - can use more intensive encryption
+        probabilities['RSA'] += 0.1
+        probabilities['Kyber'] += 0.05
+        reason += " and small files can use more intensive encryption methods"
     
-    return selected_method, reason, dict(zip(encryption_methods, probabilities))
+    # Normalize probabilities
+    total = sum(probabilities.values())
+    probabilities = {k: v/total for k, v in probabilities.items()}
+    
+    # Select method with highest probability
+    recommended_method = max(probabilities, key=probabilities.get)
+    
+    return recommended_method, reason, probabilities
 
 def encrypt_file(file_data, method, file_id):
-    """Encrypt file using the selected method"""
+    """Encrypt file using the selected method with enhanced security"""
+    encryption_time = datetime.now()
+    
+    # Update encryption stats
+    if method in st.session_state.encryption_stats:
+        st.session_state.encryption_stats[method] += 1
+    
     if method == 'AES':
-        key = generate_secure_key(32)
+        # Generate a secure key and initialization vector
+        key = generate_secure_key(32)  # 256-bit key
         iv = os.urandom(16)
+        
+        # Store key info
+        st.session_state.encryption_keys[file_id] = {
+            'method': 'AES',
+            'key': base64.b64encode(key).decode(),
+            'iv': base64.b64encode(iv).decode(),
+            'timestamp': encryption_time,
+            'key_size': len(key) * 8
+        }
+        
+        # Pad the data to ensure it's a multiple of the block size
         padder = padding.PKCS7(algorithms.AES.block_size).padder()
         padded_data = padder.update(file_data) + padder.finalize()
+        
+        # Create and use the cipher
         cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
         encryptor = cipher.encryptor()
         encrypted_data = encryptor.update(padded_data) + encryptor.finalize()
-        return base64.b64encode(encrypted_data), {'key': base64.b64encode(key).decode(), 'iv': base64.b64encode(iv).decode()}
+        
+        # Return base64 encoded encrypted data and encryption info
+        return base64.b64encode(encrypted_data), {
+            'key': base64.b64encode(key).decode(),
+            'iv': base64.b64encode(iv).decode()
+        }
     
     elif method == 'RSA':
         # For demonstration, using smaller key size for speed
@@ -499,6 +590,17 @@ def encrypt_file(file_data, method, file_id):
             backend=default_backend()
         )
         public_key = private_key.public_key()
+        
+        # Store key info
+        st.session_state.encryption_keys[file_id] = {
+            'method': 'RSA',
+            'public_key': base64.b64encode(public_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            )).decode(),
+            'timestamp': encryption_time,
+            'key_size': 2048
+        }
         
         # RSA can only encrypt small chunks, so we'll use hybrid encryption
         aes_key = generate_secure_key(32)
@@ -536,6 +638,16 @@ def encrypt_file(file_data, method, file_id):
         key = simulate_qubit_key_generation(file_id, 32)
         iv = os.urandom(16)
         
+        # Store key info
+        st.session_state.encryption_keys[file_id] = {
+            'method': 'Kyber',
+            'key': base64.b64encode(key).decode(),
+            'iv': base64.b64encode(iv).decode(),
+            'timestamp': encryption_time,
+            'key_size': len(key) * 8,
+            'quantum_resistant': True
+        }
+        
         # Use AES for the actual encryption (simulating hybrid encryption)
         padder = padding.PKCS7(algorithms.AES.block_size).padder()
         padded_data = padder.update(file_data) + padder.finalize()
@@ -554,6 +666,16 @@ def encrypt_file(file_data, method, file_id):
         key = simulate_qubit_key_generation(file_id, 32)
         iv = os.urandom(16)
         
+        # Store key info
+        st.session_state.encryption_keys[file_id] = {
+            'method': 'NTRU',
+            'key': base64.b64encode(key).decode(),
+            'iv': base64.b64encode(iv).decode(),
+            'timestamp': encryption_time,
+            'key_size': len(key) * 8,
+            'quantum_resistant': True
+        }
+        
         # Use AES for the actual encryption (simulating hybrid encryption)
         padder = padding.PKCS7(algorithms.AES.block_size).padder()
         padded_data = padder.update(file_data) + padder.finalize()
@@ -565,6 +687,30 @@ def encrypt_file(file_data, method, file_id):
             'key': base64.b64encode(key).decode(),
             'iv': base64.b64encode(iv).decode(),
             'quantum_resistant': True
+        }
+    elif method == 'ChaCha20':
+        # ChaCha20 is a modern stream cipher
+        key = generate_secure_key(32)
+        nonce = os.urandom(16)
+        
+        # Store key info
+        st.session_state.encryption_keys[file_id] = {
+            'method': 'ChaCha20',
+            'key': base64.b64encode(key).decode(),
+            'nonce': base64.b64encode(nonce).decode(),
+            'timestamp': encryption_time,
+            'key_size': len(key) * 8
+        }
+        
+        # Create and use the cipher
+        algorithm = algorithms.ChaCha20(key, nonce)
+        cipher = Cipher(algorithm, mode=None, backend=default_backend())
+        encryptor = cipher.encryptor()
+        encrypted_data = encryptor.update(file_data)
+        
+        return base64.b64encode(encrypted_data), {
+            'key': base64.b64encode(key).decode(),
+            'nonce': base64.b64encode(nonce).decode()
         }
     
     else:
@@ -622,247 +768,605 @@ def decrypt_file(encrypted_data, encryption_info, method):
         unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
         return unpadder.update(padded_data) + unpadder.finalize()
     
+    elif method == 'ChaCha20':
+        key = base64.b64decode(encryption_info['key'])
+        nonce = base64.b64decode(encryption_info['nonce'])
+        encrypted_bytes = base64.b64decode(encrypted_data)
+        
+        algorithm = algorithms.ChaCha20(key, nonce)
+        cipher = Cipher(algorithm, mode=None, backend=default_backend())
+        decryptor = cipher.decryptor()
+        return decryptor.update(encrypted_bytes) + decryptor.finalize()
+    
     else:
         raise ValueError(f"Unsupported encryption method: {method}")
-
-def create_merkle_tree(file_data, file_id):
-    """Create a Merkle tree for file integrity verification"""
-    # Split file into chunks
-    chunk_size = 1024  # 1KB chunks
-    chunks = [file_data[i:i+chunk_size] for i in range(0, len(file_data), chunk_size)]
+def render_settings():
+    """Render the settings section"""
+    st.markdown("## Settings")
     
-    # Calculate leaf hashes
-    leaf_hashes = [hashlib.sha256(chunk).hexdigest() for chunk in chunks]
+    # Create tabs for different settings categories
+    settings_tab1, settings_tab2, settings_tab3 = st.tabs(["Security", "Appearance", "Advanced"])
     
-    # Build the tree
-    tree = leaf_hashes.copy()
-    while len(tree) > 1:
-        # If odd number of nodes, duplicate the last one
-        if len(tree) % 2 == 1:
-            tree.append(tree[-1])
+    with settings_tab1:
+        st.markdown("### Security Settings")
         
-        # Create parent nodes
-        parents = []
-        for i in range(0, len(tree), 2):
-            combined = tree[i] + tree[i+1]
-            parent_hash = hashlib.sha256(combined.encode()).hexdigest()
-            parents.append(parent_hash)
+        # Password change
+        st.markdown("#### Change Password")
+        current_password = st.text_input("Current Password", type="password", key="current_password")
+        new_password = st.text_input("New Password", type="password", key="new_password")
+        confirm_password = st.text_input("Confirm New Password", type="password", key="confirm_password")
         
-        tree = parents
-    
-    # Store the tree
-    st.session_state.merkle_trees[file_id] = {
-        'root': tree[0],
-        'leaves': leaf_hashes,
-        'access_history': []
-    }
-    
-    return tree[0]  # Return the root hash
-
-def verify_file_integrity(file_data, file_id):
-    """Verify file integrity using the Merkle tree"""
-    if file_id not in st.session_state.merkle_trees:
-        return False, "No Merkle tree found for this file"
-    
-    # Split file into chunks
-    chunk_size = 1024  # 1KB chunks
-    chunks = [file_data[i:i+chunk_size] for i in range(0, len(file_data), chunk_size)]
-    
-    # Calculate leaf hashes
-    leaf_hashes = [hashlib.sha256(chunk).hexdigest() for chunk in chunks]
-    
-    # Compare with stored leaves
-    stored_leaves = st.session_state.merkle_trees[file_id]['leaves']
-    
-    if len(leaf_hashes) != len(stored_leaves):
-        return False, "File size has changed"
-    
-    # Find any modified chunks
-    modified_chunks = []
-    for i, (current, stored) in enumerate(zip(leaf_hashes, stored_leaves)):
-        if current != stored:
-            modified_chunks.append(i)
-    
-    if modified_chunks:
-        return False, f"File has been modified in chunks: {modified_chunks}"
-    
-    return True, "File integrity verified"
-
-def log_file_access(file_id, username, action):
-    """Log file access to the Merkle tree and global logs"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_entry = {
-        'timestamp': timestamp,
-        'username': username,
-        'action': action,
-        'file_id': file_id
-    }
-    
-    # Add to global logs
-    st.session_state.access_logs.append(log_entry)
-    
-    # Add to user's access history
-    st.session_state.users[username]['access_history'].append(log_entry)
-    
-    # Add to file's Merkle tree access history
-    if file_id in st.session_state.merkle_trees:
-        st.session_state.merkle_trees[file_id]['access_history'].append(log_entry)
-    
-    # Update user score based on activity
-    update_user_score(username, action)
-
-def update_user_score(username, action):
-    """Update user score based on their file access patterns and actions"""
-    score_changes = {
-        'upload': 5,
-        'download': 1,
-        'share': 3,
-        'delete': -1,
-        'view': 0.5
-    }
-    
-    if action in score_changes:
-        st.session_state.users[username]['score'] += score_changes[action]
-        # Cap score between 0 and 100
-        st.session_state.users[username]['score'] = max(0, min(100, st.session_state.users[username]['score']))
-
-# Replace the parse_nlp_permission function with a simpler version that doesn't use NLTK
-def parse_nlp_permission(command, username):
-    """Parse natural language permission commands without using NLTK"""
-    command = command.lower()
-    
-    # Extract action (grant, revoke, etc.)
-    action_words = {'grant', 'give', 'allow', 'share', 'revoke', 'remove', 'deny', 'restrict'}
-    action = None
-    for word in action_words:
-        if word in command:
-            action = 'grant' if word in {'grant', 'give', 'allow', 'share'} else 'revoke'
-            break
-    
-    # Extract permission type (read, write, etc.)
-    permission_types = {'read', 'write', 'edit', 'delete', 'view', 'access', 'full'}
-    permission = None
-    for word in permission_types:
-        if word in command:
-            permission = word
-            break
-    
-    # Extract target user
-    users = list(st.session_state.users.keys())
-    target_user = None
-    for user in users:
-        if user in command and user != username:
-            target_user = user
-            break
-    
-    # Extract file name/id
-    file_pattern = r'file\s+(\w+)'
-    file_matches = re.findall(file_pattern, command)
-    file_id = file_matches[0] if file_matches else None
-    
-    # If file_id not found by pattern, try to find any file ID in the command
-    if not file_id:
-        user_files = st.session_state.users[username]['files']
-        for fid in user_files:
-            if fid in command:
-                file_id = fid
-                break
-    
-    return {
-        'action': action,
-        'permission': permission if permission else 'read',  # Default to read
-        'target_user': target_user,
-        'file_id': file_id,
-        'success': all([action, target_user, file_id])
-    }
-
-def apply_permission(parsed_command, username):
-    """Apply the parsed permission command"""
-    if not parsed_command['success']:
-        missing = []
-        if not parsed_command['action']:
-            missing.append('action (grant or revoke)')
-        if not parsed_command['target_user']:
-            missing.append('target user')
-        if not parsed_command['file_id']:
-            missing.append('file identifier')
+        if st.button("Change Password"):
+            # Verify current password
+            if st.session_state.users[st.session_state.username]["password"] != current_password:
+                st.error("Current password is incorrect")
+            elif new_password != confirm_password:
+                st.error("New passwords do not match")
+            elif not new_password:
+                st.error("New password cannot be empty")
+            else:
+                # Check password strength
+                strength = check_password_strength(new_password)
+                
+                if strength['score'] < 40:
+                    st.warning(f"Password strength: {strength['level']} ({strength['score']}/100)")
+                    st.markdown("<ul>", unsafe_allow_html=True)
+                    for feedback in strength['feedback']:
+                        st.markdown(f"<li>{feedback}</li>", unsafe_allow_html=True)
+                    st.markdown("</ul>", unsafe_allow_html=True)
+                    
+                    # Allow override with confirmation
+                    if st.button("Use Weak Password Anyway"):
+                        st.session_state.users[st.session_state.username]["password"] = new_password
+                        st.success("Password changed successfully")
+                        log_security_event(st.session_state.username, "password_change", "Password changed (weak)")
+                else:
+                    st.session_state.users[st.session_state.username]["password"] = new_password
+                    st.success("Password changed successfully")
+                    log_security_event(st.session_state.username, "password_change", "Password changed")
         
-        return False, f"Could not understand the command. Missing: {', '.join(missing)}"
-    
-    action = parsed_command['action']
-    permission = parsed_command['permission']
-    target_user = parsed_command['target_user']
-    file_id = parsed_command['file_id']
-    
-    # Check if file exists and belongs to the user
-    if file_id not in st.session_state.users[username]['files']:
-        return False, f"You don't own a file with ID {file_id}"
-    
-    # Check if target user exists
-    if target_user not in st.session_state.users:
-        return False, f"User {target_user} does not exist"
-    
-    # Initialize permissions structure if needed
-    if file_id not in st.session_state.nlp_permissions:
-        st.session_state.nlp_permissions[file_id] = {}
-    
-    if action == 'grant':
-        # Grant permission
-        st.session_state.nlp_permissions[file_id][target_user] = permission
+        # Entropy collection
+        st.markdown("#### Entropy Collection")
+        st.markdown("""
+        Move your mouse randomly in the box below to generate entropy for stronger encryption keys.
+        This simulates collecting randomness from browser events.
+        """)
         
-        # Add to shared files for the target user
-        if file_id not in st.session_state.users[target_user]['shared_files']:
-            file_info = st.session_state.users[username]['files'][file_id].copy()
-            file_info['owner'] = username
-            file_info['permission'] = permission
-            st.session_state.users[target_user]['shared_files'][file_id] = file_info
-        else:
-            st.session_state.users[target_user]['shared_files'][file_id]['permission'] = permission
-        
-        return True, f"Granted {permission} permission to {target_user} for file {file_id}"
-    
-    elif action == 'revoke':
-        # Revoke permission
-        if target_user in st.session_state.nlp_permissions.get(file_id, {}):
-            del st.session_state.nlp_permissions[file_id][target_user]
+        # Create a canvas for mouse movement
+        st.markdown("""
+        <div id="entropy-canvas" style="width: 100%; height: 200px; background-color: #f0f2f6; border-radius: 10px; position: relative;">
+            <div id="entropy-pointer" style="width: 10px; height: 10px; background-color: #4e8df5; border-radius: 50%; position: absolute; top: 50%; left: 50%;"></div>
+        </div>
+        <script>
+            const canvas = document.getElementById('entropy-canvas');
+            const pointer = document.getElementById('entropy-pointer');
             
-            # Remove from shared files for the target user
-            if file_id in st.session_state.users[target_user]['shared_files']:
-                del st.session_state.users[target_user]['shared_files'][file_id]
+            canvas.addEventListener('mousemove', function(e) {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                
+                pointer.style.left = x + 'px';
+                pointer.style.top = y + 'px';
+                
+                // In a real app, we would send this data to the server
+                console.log('Entropy collected:', x, y, Date.now());
+            });
+        </script>
+        """, unsafe_allow_html=True)
+        
+        # Simulate entropy collection
+        if st.button("Simulate Entropy Collection"):
+            # Generate random mouse movements
+            for _ in range(100):
+                x = random.randint(0, 100)
+                y = random.randint(0, 100)
+                timestamp = time.time()
+                collect_entropy(f"{x},{y},{timestamp}")
             
-            return True, f"Revoked permissions from {target_user} for file {file_id}"
+            st.success(f"Collected 100 entropy samples. Total pool size: {len(st.session_state.entropy_pool)}")
+        
+        # Security logs
+        st.markdown("#### Security Logs")
+        if st.session_state.security_alerts:
+            logs_df = pd.DataFrame(st.session_state.security_alerts[-10:])
+            st.dataframe(logs_df)
         else:
-            return False, f"{target_user} doesn't have permissions for file {file_id}"
+            st.info("No security logs available")
     
-    return False, "Unknown action"
-
-# ================ UI COMPONENTS ================
-
-def login_page():
-    """Render the login page"""
-    st.markdown("<h1 style='text-align: center; color: #4e8df5;'>CipherCloud</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; font-size: 1.2em;'>Secure File Sharing with Advanced Encryption</p>", unsafe_allow_html=True)
+    with settings_tab2:
+        st.markdown("### Appearance Settings")
+        
+        # Dark mode toggle
+        dark_mode = st.toggle("Dark Mode", st.session_state.dark_mode)
+        if dark_mode != st.session_state.dark_mode:
+            st.session_state.dark_mode = dark_mode
+            if dark_mode:
+                st.markdown("""
+                <script>
+                    document.body.classList.add('dark-mode');
+                </script>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <script>
+                    document.body.classList.remove('dark-mode');
+                </script>
+                """, unsafe_allow_html=True)
+            st.rerun()
+        
+        # Color theme selection
+        st.markdown("#### Color Theme")
+        theme_options = ["Blue (Default)", "Green", "Purple", "Orange"]
+        selected_theme = st.selectbox("Select Theme", theme_options)
+        
+        # Preview the selected theme
+        theme_colors = {
+            "Blue (Default)": {"primary": "#4e8df5", "secondary": "#f5924e"},
+            "Green": {"primary": "#4CAF50", "secondary": "#FFC107"},
+            "Purple": {"primary": "#9C27B0", "secondary": "#FF9800"},
+            "Orange": {"primary": "#FF5722", "secondary": "#2196F3"}
+        }
+        
+        selected_colors = theme_colors[selected_theme]
+        st.markdown(f"""
+        <div style="display: flex; margin-top: 20px;">
+            <div style="background-color: {selected_colors['primary']}; width: 100px; height: 100px; border-radius: 10px; margin-right: 20px; display: flex; justify-content: center; align-items: center; color: white;">
+                Primary
+            </div>
+            <div style="background-color: {selected_colors['secondary']}; width: 100px; height: 100px; border-radius: 10px; display: flex; justify-content: center; align-items: center; color: white;">
+                Secondary
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if st.button("Apply Theme"):
+            # In a real app, this would update CSS variables
+            st.success(f"Theme changed to {selected_theme}")
+            
+            # Store in user preferences
+            if 'appearance' not in st.session_state.user_preferences:
+                st.session_state.user_preferences['appearance'] = {}
+            
+            st.session_state.user_preferences['appearance']['theme'] = selected_theme
+            st.rerun()
     
-    # Create columns for layout
-    col1, col2, col3 = st.columns([1, 2, 1])
+    with settings_tab3:
+        st.markdown("### Advanced Settings")
+        
+        # Encryption defaults
+        st.markdown("#### Default Encryption Method")
+        default_method = st.selectbox(
+            "Select default encryption method",
+            ['AES', 'RSA', 'Kyber', 'NTRU', 'ChaCha20']
+        )
+        
+        if st.button("Set Default"):
+            # Store in user preferences
+            if 'encryption' not in st.session_state.user_preferences:
+                st.session_state.user_preferences['encryption'] = {}
+            
+            st.session_state.user_preferences['encryption']['default_method'] = default_method
+            st.success(f"Default encryption method set to {default_method}")
+        
+        # Quantum key simulation
+        st.markdown("#### Quantum Key Simulation")
+        st.markdown("""
+        This section simulates quantum computing-based key generation using qubits.
+        In a real quantum computer, qubits can exist in multiple states simultaneously due to superposition.
+        """)
+        
+        if st.button("Simulate Qubit Key Generation"):
+            # Generate a sample key
+            key = simulate_qubit_key_generation("demo", 16)
+            key_hex = key.hex()
+            
+            # Visualize the key as qubits
+            st.markdown("#### Simulated Qubit States")
+            
+            # Convert key to binary representation
+            key_bin = ''.join(format(byte, '08b') for byte in key[:8])  # Show first 8 bytes
+            
+            # Display as a grid of qubits
+            cols = st.columns(8)
+            for i, col in enumerate(cols):
+                with col:
+                    st.markdown(f"**Qubit {i+1}**")
+                    for j in range(8):
+                        idx = i*8 + j
+                        if idx < len(key_bin):
+                            bit = key_bin[idx]
+                            color = "#4e8df5" if bit == "1" else "#f5f7f9"
+                            st.markdown(f"""
+                            <div style="width: 30px; height: 30px; border-radius: 50%; background-color: {color}; 
+                                        margin: 5px auto; display: flex; justify-content: center; align-items: center;
+                                        color: white; font-weight: bold;">
+                                {bit}
+                            </div>
+                            """, unsafe_allow_html=True)
+            
+            st.markdown(f"**Generated Key (Hex):** `{key_hex}`")
+        
+        # Export/Import settings
+        st.markdown("#### Export/Import Settings")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("Export Settings"):
+                # Create a JSON representation of user settings
+                user_data = {
+                    "username": st.session_state.username,
+                    "preferences": st.session_state.user_preferences,
+                    "encryption_stats": st.session_state.encryption_stats,
+                    "score": st.session_state.users[st.session_state.username]['score']
+                }
+                
+                # Convert to JSON string
+                json_data = json.dumps(user_data, indent=2)
+                
+                # Create download link
+                b64 = base64.b64encode(json_data.encode()).decode()
+                href = f'<a href="data:application/json;base64,{b64}" download="ciphercloud_settings.json">Download Settings</a>'
+                st.markdown(href, unsafe_allow_html=True)
+        
+        with col2:
+            uploaded_settings = st.file_uploader("Import Settings", type=["json"])
+            if uploaded_settings is not None:
+                try:
+                    settings_data = json.loads(uploaded_settings.read().decode())
+                    
+                    # Validate settings data
+                    if "preferences" in settings_data:
+                        st.session_state.user_preferences = settings_data["preferences"]
+                        st.success("Settings imported successfully")
+                    else:
+                        st.error("Invalid settings file")
+                except Exception as e:
+                    st.error(f"Error importing settings: {str(e)}")
+
+def render_analytics():
+    """Render advanced analytics dashboard"""
+    st.markdown("## Analytics Dashboard")
+    
+    # Create metrics row
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown("<div class='dashboard-card'>", unsafe_allow_html=True)
+        total_files = sum(len(user_data['files']) for user_data in st.session_state.users.values())
+        st.markdown(f"<p class='metric-label'>Total Files</p>", unsafe_allow_html=True)
+        st.markdown(f"<p class='metric-value'>{total_files}</p>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
     
     with col2:
-        st.markdown("<div class='login-container'>", unsafe_allow_html=True)
-        st.markdown("<h2 style='text-align: center; margin-bottom: 20px;'>Login</h2>", unsafe_allow_html=True)
+        st.markdown("<div class='dashboard-card'>", unsafe_allow_html=True)
+        total_users = len(st.session_state.users)
+        st.markdown(f"<p class='metric-label'>Total Users</p>", unsafe_allow_html=True)
+        st.markdown(f"<p class='metric-value'>{total_users}</p>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown("<div class='dashboard-card'>", unsafe_allow_html=True)
+        total_shares = sum(len(user_data['shared_files']) for user_data in st.session_state.users.values())
+        st.markdown(f"<p class='metric-label'>Total Shares</p>", unsafe_allow_html=True)
+        st.markdown(f"<p class='metric-value'>{total_shares}</p>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown("<div class='dashboard-card'>", unsafe_allow_html=True)
+        total_logs = len(st.session_state.access_logs)
+        st.markdown(f"<p class='metric-label'>Total Activities</p>", unsafe_allow_html=True)
+        st.markdown(f"<p class='metric-value'>{total_logs}</p>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    # Encryption methods distribution
+    st.markdown("### Encryption Methods Distribution")
+    
+    # Create DataFrame for visualization
+    encryption_data = pd.DataFrame({
+        'Method': list(st.session_state.encryption_stats.keys()),
+        'Count': list(st.session_state.encryption_stats.values())
+    })
+    
+    # Create interactive chart with Plotly
+    fig = px.pie(
+        encryption_data, 
+        values='Count', 
+        names='Method',
+        title='Encryption Methods Distribution',
+        color_discrete_sequence=px.colors.qualitative.Bold
+    )
+    fig.update_traces(textposition='inside', textinfo='percent+label')
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # User activity over time
+    st.markdown("### User Activity Over Time")
+    
+    if st.session_state.access_logs:
+        # Create DataFrame from logs
+        logs_df = pd.DataFrame(st.session_state.access_logs)
         
-        username = st.text_input("Username", key="login_username")
-        password = st.text_input("Password", type="password", key="login_password")
+        # Convert timestamp to datetime
+        logs_df['timestamp'] = pd.to_datetime(logs_df['timestamp'])
         
-        if st.button("Login", key="login_button"):
-            if username in st.session_state.users and st.session_state.users[username]["password"] == password:
-                st.session_state.logged_in = True
-                st.session_state.username = username
+        # Group by day and action
+        logs_df['date'] = logs_df['timestamp'].dt.date
+        activity_by_date = logs_df.groupby(['date', 'action']).size().reset_index(name='count')
+        
+        # Create interactive time series chart
+        fig = px.line(
+            activity_by_date,
+            x='date',
+            y='count',
+            color='action',
+            title='User Activity Over Time',
+            labels={'count': 'Number of Actions', 'date': 'Date'},
+            markers=True
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No activity logs available for visualization")
+    
+    # User scores comparison
+    st.markdown("### User Scores Comparison")
+    
+    # Create DataFrame for user scores
+    user_scores = pd.DataFrame({
+        'User': list(st.session_state.users.keys()),
+        'Score': [user_data['score'] for user_data in st.session_state.users.values()]
+    })
+    
+    # Create bar chart
+    fig = px.bar(
+        user_scores,
+        x='User',
+        y='Score',
+        title='User Security Scores',
+        labels={'Score': 'Security Score (0-100)'},
+        color='Score',
+        color_continuous_scale=px.colors.sequential.Viridis
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # File size distribution
+    st.markdown("### File Size Distribution")
+    
+    # Collect file sizes
+    file_sizes = []
+    file_types = []
+    
+    for username, user_data in st.session_state.users.items():
+        for file_id, file_info in user_data['files'].items():
+            file_sizes.append(file_info['size'])
+            file_extension = os.path.splitext(file_info['filename'])[1].lower()
+            file_types.append(file_extension if file_extension else 'unknown')
+    
+    if file_sizes:
+        # Create DataFrame
+        files_df = pd.DataFrame({
+            'Size (KB)': [size / 1024 for size in file_sizes],
+            'Type': file_types
+        })
+        
+        # Create histogram
+        fig = px.histogram(
+            files_df,
+            x='Size (KB)',
+            color='Type',
+            title='File Size Distribution',
+            labels={'Size (KB)': 'File Size (KB)'},
+            nbins=20
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No files available for analysis")
+
+def render_file_details(file_id, file_info, is_owner=True):
+    """Render detailed view of a file"""
+    st.markdown(f"## File Details: {file_info['filename']}")
+    
+    # Create columns for layout
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.markdown("<div class='dashboard-card'>", unsafe_allow_html=True)
+        st.markdown("### File Information")
+        
+        # Basic info
+        st.markdown(f"**File ID:** {file_id}")
+        st.markdown(f"**Filename:** {file_info['filename']}")
+        st.markdown(f"**Upload Date:** {file_info['upload_date']}")
+        st.markdown(f"**Size:** {file_info['size']} bytes ({file_info['size'] / 1024:.2f} KB)")
+        
+        # Encryption info
+        st.markdown(f"**Encryption Method:** <span class='{file_info['encryption_method'].lower()}-badge encryption-badge'>{file_info['encryption_method']}</span>", unsafe_allow_html=True)
+        
+        # File type and icon
+        file_extension = os.path.splitext(file_info['filename'])[1].lower()
+        file_type = file_extension[1:] if file_extension else "unknown"
+        
+        # File preview (if possible)
+        st.markdown("### Preview")
+        
+        # For demo purposes, just show a placeholder
+        st.markdown(f"""
+        <div style="background-color: #f5f7f9; padding: 20px; border-radius: 10px; text-align: center;">
+            <p style="font-size: 3em; margin: 0;">📄</p>
+            <p>{file_type.upper()} File</p>
+            <p>Preview not available for encrypted files</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # File actions
+        st.markdown("### Actions")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("Download", key=f"detail_download_{file_id}"):
+                try:
+                    encrypted_data = file_info['data']
+                    decrypted_data = decrypt_file(
+                        encrypted_data,
+                        file_info['encryption_info'],
+                        file_info['encryption_method']
+                    )
+                    
+                    # Log the access
+                    log_file_access(file_id, st.session_state.username, 'download')
+                    
+                    # Verify integrity
+                    integrity_ok, message = verify_file_integrity(decrypted_data, file_id)
+                    if not integrity_ok:
+                        st.warning(message)
+                    
+                    # Create download link
+                    b64 = base64.b64encode(decrypted_data).decode()
+                    href = f'<a href="data:application/octet-stream;base64,{b64}" download="{file_info["filename"]}">Click to download</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+                    
+                except Exception as e:
+                    st.error(f"Error downloading file: {str(e)}")
+        
+        with col2:
+            if is_owner and st.button("Share", key=f"detail_share_{file_id}"):
+                st.session_state.sharing_file_id = file_id
+                st.rerun()
+        
+        with col3:
+            if is_owner and st.button("Delete", key=f"detail_delete_{file_id}"):
+                del st.session_state.users[st.session_state.username]['files'][file_id]
+                log_file_access(file_id, st.session_state.username, 'delete')
+                st.success(f"File {file_id} deleted successfully.")
+                st.session_state.viewing_file_id = None
+                st.rerun()
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    with col2:
+        # File history and activity
+        st.markdown("<div class='dashboard-card'>", unsafe_allow_html=True)
+        st.markdown("### Activity History")
+        
+        # Get file access history
+        file_history = []
+        for log in st.session_state.access_logs:
+            if log['file_id'] == file_id:
+                file_history.append(log)
+        
+        if file_history:
+            for activity in reversed(file_history[-5:]):
+                st.markdown(f"""
+                <div style="padding: 10px; background-color: #f5f7f9; border-radius: 5px; margin-bottom: 10px;">
+                    <p style="margin: 0; color: #718096;">{activity['timestamp']}</p>
+                    <p style="margin: 0; font-weight: bold;">{activity['username']} - {activity['action'].capitalize()}</p>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("No activity recorded for this file")
+        
+        # File integrity
+        st.markdown("### File Integrity")
+        
+        if file_id in st.session_state.merkle_trees:
+            merkle_root = st.session_state.merkle_trees[file_id]['root']
+            st.markdown(f"**Merkle Root:** `{merkle_root[:10]}...`")
+            
+            if st.button("Verify Integrity"):
+                try:
+                    encrypted_data = file_info['data']
+                    decrypted_data = decrypt_file(
+                        encrypted_data,
+                        file_info['encryption_info'],
+                        file_info['encryption_method']
+                    )
+                    
+                    integrity_ok, message = verify_file_integrity(decrypted_data, file_id)
+                    
+                    if integrity_ok:
+                        st.success("File integrity verified successfully")
+                    else:
+                        st.error(message)
+                        
+                except Exception as e:
+                    st.error(f"Error verifying integrity: {str(e)}")
+        else:
+            st.warning("No integrity data available for this file")
+        
+        # File comments
+        st.markdown("### Comments")
+        
+        # Initialize comments for this file if needed
+        if file_id not in st.session_state.file_comments:
+            st.session_state.file_comments[file_id] = []
+        
+        # Display existing comments
+        for comment in st.session_state.file_comments[file_id]:
+            st.markdown(f"""
+            <div style="padding: 10px; background-color: #f5f7f9; border-radius: 5px; margin-bottom: 10px;">
+                <p style="margin: 0; color: #718096;">{comment['timestamp']} - {comment['username']}</p>
+                <p style="margin: 0;">{comment['text']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Add new comment
+        new_comment = st.text_area("Add a comment", key=f"comment_{file_id}")
+        if st.button("Post Comment"):
+            if new_comment:
+                comment = {
+                    'username': st.session_state.username,
+                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    'text': new_comment
+                }
+                st.session_state.file_comments[file_id].append(comment)
+                st.success("Comment added")
                 st.rerun()
             else:
-                st.error("Invalid username or password")
+                st.warning("Comment cannot be empty")
         
-        st.markdown("<p style='text-align: center; margin-top: 20px;'>Demo accounts: admin/admin123 or user1/user123</p>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
+
+def render_notifications():
+    """Render user notifications"""
+    if st.session_state.notifications:
+        with st.sidebar:
+            st.markdown("### Notifications")
+            
+            for i, notification in enumerate(st.session_state.notifications):
+                notification_type = notification.get('type', 'info')
+                
+                if notification_type == 'info':
+                    class_name = 'notification-info'
+                elif notification_type == 'success':
+                    class_name = 'notification-success'
+                elif notification_type == 'warning':
+                    class_name = 'notification-warning'
+                elif notification_type == 'error':
+                    class_name = 'notification-error'
+                
+                st.markdown(f"""
+                <div class="notification {class_name}">
+                    <p style="margin: 0; font-weight: bold;">{notification['title']}</p>
+                    <p style="margin: 0;">{notification['message']}</p>
+                    <p style="margin: 0; font-size: 0.8em; color: #718096;">{notification['timestamp']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                if st.button("Dismiss", key=f"dismiss_{i}"):
+                    st.session_state.notifications.pop(i)
+                    st.rerun()
+
+def add_notification(title, message, notification_type='info'):
+    """Add a notification to the user's notification list"""
+    notification = {
+        'title': title,
+        'message': message,
+        'type': notification_type,
+        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    
+    st.session_state.notifications.append(notification)
 
 def main_app():
     """Render the main application after login"""
@@ -881,9 +1385,8 @@ def main_app():
                    f"</div>", unsafe_allow_html=True)
         
         # Navigation
-               # Navigation
         st.markdown("### Navigation")
-        app_mode = st.radio("", ["Dashboard", "My Files", "Shared Files", "Upload File", "File Permissions", "Settings"])
+        app_mode = st.radio("", ["Dashboard", "My Files", "Shared Files", "Upload File", "File Permissions", "Analytics", "Settings"])
         
         if st.button("Logout"):
             st.session_state.logged_in = False
@@ -894,546 +1397,55 @@ def main_app():
     st.markdown("<h1 style='color: #4e8df5;'>CipherCloud</h1>", unsafe_allow_html=True)
     st.markdown("<p style='font-size: 1.2em;'>Secure File Sharing with Advanced Encryption</p>", unsafe_allow_html=True)
     
-    # Display different sections based on navigation
-    if app_mode == "Dashboard":
-        render_dashboard()
-    elif app_mode == "My Files":
-        render_my_files()
-    elif app_mode == "Shared Files":
-        render_shared_files()
-    elif app_mode == "Upload File":
-        render_upload_file()
-    elif app_mode == "File Permissions":
-        render_file_permissions()
-    elif app_mode == "Settings":
-        render_settings()
-
-def render_dashboard():
-    """Render the dashboard with analytics and visualizations"""
-    st.markdown("## Dashboard")
+    # Render notifications
+    render_notifications()
     
-    # Create metrics row
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.markdown("<div class='dashboard-card'>", unsafe_allow_html=True)
-        num_files = len(st.session_state.users[st.session_state.username]['files'])
-        st.markdown(f"<p class='metric-label'>My Files</p>", unsafe_allow_html=True)
-        st.markdown(f"<p class='metric-value'>{num_files}</p>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("<div class='dashboard-card'>", unsafe_allow_html=True)
-        num_shared = len(st.session_state.users[st.session_state.username]['shared_files'])
-        st.markdown(f"<p class='metric-label'>Shared With Me</p>", unsafe_allow_html=True)
-        st.markdown(f"<p class='metric-value'>{num_shared}</p>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown("<div class='dashboard-card'>", unsafe_allow_html=True)
-        user_score = st.session_state.users[st.session_state.username]['score']
-        st.markdown(f"<p class='metric-label'>User Score</p>", unsafe_allow_html=True)
-        st.markdown(f"<p class='metric-value'>{user_score}</p>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-    
-    with col4:
-        st.markdown("<div class='dashboard-card'>", unsafe_allow_html=True)
-        access_count = len(st.session_state.users[st.session_state.username]['access_history'])
-        st.markdown(f"<p class='metric-label'>Activities</p>", unsafe_allow_html=True)
-        st.markdown(f"<p class='metric-value'>{access_count}</p>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-    
-    # Create visualization row
-    st.markdown("### Encryption Methods Used")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Encryption methods pie chart
-        fig, ax = plt.subplots(figsize=(8, 6))
-        labels = list(st.session_state.encryption_stats.keys())
-        sizes = list(st.session_state.encryption_stats.values())
+    # Check if viewing a specific file
+    if hasattr(st.session_state, 'viewing_file_id') and st.session_state.viewing_file_id:
+        file_id = st.session_state.viewing_file_id
         
-        if sum(sizes) > 0:
-            colors = ['#4e8df5', '#f5924e', '#4ef58d', '#f54e8d']
-            ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90, colors=colors)
-            ax.axis('equal')
-            st.pyplot(fig)
+        # Check if file is in user's files
+        if file_id in st.session_state.users[st.session_state.username]['files']:
+            file_info = st.session_state.users[st.session_state.username]['files'][file_id]
+            render_file_details(file_id, file_info, is_owner=True)
+        # Check if file is in shared files
+        elif file_id in st.session_state.users[st.session_state.username]['shared_files']:
+            file_info = st.session_state.users[st.session_state.username]['shared_files'][file_id]
+            owner = file_info['owner']
+            owner_file_info = st.session_state.users[owner]['files'][file_id]
+            render_file_details(file_id, owner_file_info, is_owner=False)
         else:
-            st.info("No files have been encrypted yet.")
-    
-    with col2:
-        # Recent activity
-        st.markdown("### Recent Activity")
+            st.error("File not found")
+            st.session_state.viewing_file_id = None
+            st.rerun()
         
-        user_history = st.session_state.users[st.session_state.username]['access_history']
-        if user_history:
-            for i, activity in enumerate(reversed(user_history[-5:])):
-                st.markdown(f"""
-                <div style='padding: 10px; background-color: white; border-radius: 5px; margin-bottom: 10px;'>
-                    <p style='margin: 0; color: #718096;'>{activity['timestamp']}</p>
-                    <p style='margin: 0; font-weight: bold;'>{activity['action'].capitalize()} - File ID: {activity['file_id']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.info("No recent activity.")
-    
-    # File access patterns
-    st.markdown("### File Access Patterns")
-    
-    # Get access history for visualization
-    if st.session_state.access_logs:
-        # Create a DataFrame for visualization
-        df = pd.DataFrame(st.session_state.access_logs)
-        
-        # Filter for current user if needed
-        # df = df[df['username'] == st.session_state.username]
-        
-        if not df.empty:
-            # Group by action and count
-            action_counts = df['action'].value_counts().reset_index()
-            action_counts.columns = ['Action', 'Count']
-            
-            fig, ax = plt.subplots(figsize=(10, 6))
-            sns.barplot(x='Action', y='Count', data=action_counts, ax=ax)
-            ax.set_title('Actions Performed')
-            ax.set_xlabel('Action Type')
-            ax.set_ylabel('Count')
-            st.pyplot(fig)
-        else:
-            st.info("Not enough data for visualization.")
+        if st.button("Back to List"):
+            st.session_state.viewing_file_id = None
+            st.rerun()
     else:
-        st.info("No access logs available yet.")
-
-def render_my_files():
-    """Render the user's files"""
-    st.markdown("## My Files")
-    
-    user_files = st.session_state.users[st.session_state.username]['files']
-    
-    if not user_files:
-        st.info("You haven't uploaded any files yet. Go to the Upload File section to get started.")
-        return
-    
-    # Create a search box
-    search_term = st.text_input("Search files", "")
-    
-    # Filter files based on search term
-    filtered_files = {
-        file_id: file_info for file_id, file_info in user_files.items()
-        if search_term.lower() in file_info['filename'].lower()
-    }
-    
-    # Display files in a grid
-    cols = st.columns(3)
-    
-    for i, (file_id, file_info) in enumerate(filtered_files.items()):
-        col = cols[i % 3]
-        
-        with col:
-            st.markdown(f"""
-            <div class='file-card'>
-                <h3>{file_info['filename']}</h3>
-                <p>Uploaded: {file_info['upload_date']}</p>
-                <p>Size: {file_info['size']} bytes</p>
-                <p>Encryption: <span class='{file_info['encryption_method'].lower()}-badge encryption-badge'>{file_info['encryption_method']}</span></p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # File actions
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                if st.button(f"Download {file_id}", key=f"download_{file_id}"):
-                    # Decrypt and download file
-                    try:
-                        encrypted_data = file_info['data']
-                        decrypted_data = decrypt_file(
-                            encrypted_data,
-                            file_info['encryption_info'],
-                            file_info['encryption_method']
-                        )
-                        
-                        # Log the access
-                        log_file_access(file_id, st.session_state.username, 'download')
-                        
-                        # Verify integrity
-                        integrity_ok, message = verify_file_integrity(decrypted_data, file_id)
-                        if not integrity_ok:
-                            st.warning(message)
-                        
-                        # Create download link
-                        b64 = base64.b64encode(decrypted_data).decode()
-                        href = f'<a href="data:application/octet-stream;base64,{b64}" download="{file_info["filename"]}">Click to download</a>'
-                        st.markdown(href, unsafe_allow_html=True)
-                        
-                    except Exception as e:
-                        st.error(f"Error downloading file: {str(e)}")
-            
-            with col2:
-                if st.button(f"Share {file_id}", key=f"share_{file_id}"):
-                    # Set session state to show sharing dialog
-                    st.session_state.sharing_file_id = file_id
-                    st.rerun()
-            
-            with col3:
-                if st.button(f"Delete {file_id}", key=f"delete_{file_id}"):
-                    # Delete file
-                    del st.session_state.users[st.session_state.username]['files'][file_id]
-                    
-                    # Log the access
-                    log_file_access(file_id, st.session_state.username, 'delete')
-                    
-                    st.success(f"File {file_id} deleted successfully.")
-                    st.rerun()
-    
-    # Handle file sharing dialog
-    if hasattr(st.session_state, 'sharing_file_id'):
-        file_id = st.session_state.sharing_file_id
-        
-        st.markdown("### Share File")
-        st.markdown(f"Sharing file: {st.session_state.users[st.session_state.username]['files'][file_id]['filename']}")
-        
-        # List of users to share with
-        other_users = [user for user in st.session_state.users.keys() if user != st.session_state.username]
-        target_user = st.selectbox("Select user to share with", other_users)
-        
-        permission = st.selectbox("Permission", ["read", "write", "full"])
-        
-        if st.button("Share"):
-            # Create NLP command
-            command = f"grant {permission} access to {target_user} for file {file_id}"
-            parsed = parse_nlp_permission(command, st.session_state.username)
-            success, message = apply_permission(parsed, st.session_state.username)
-            
-            if success:
-                st.success(message)
-                # Log the access
-                log_file_access(file_id, st.session_state.username, 'share')
-            else:
-                st.error(message)
-            
-            # Clear sharing state
-            del st.session_state.sharing_file_id
-            st.rerun()
-        
-        if st.button("Cancel"):
-            # Clear sharing state
-            del st.session_state.sharing_file_id
-            st.rerun()
-
-def render_shared_files():
-    """Render files shared with the user"""
-    st.markdown("## Files Shared With Me")
-    
-    shared_files = st.session_state.users[st.session_state.username]['shared_files']
-    
-    if not shared_files:
-        st.info("No files have been shared with you yet.")
-        return
-    
-    # Display shared files
-    cols = st.columns(3)
-    
-    for i, (file_id, file_info) in enumerate(shared_files.items()):
-        col = cols[i % 3]
-        
-        with col:
-            st.markdown(f"""
-            <div class='file-card'>
-                <h3>{file_info['filename']}</h3>
-                <p>Owner: {file_info['owner']}</p>
-                <p>Permission: {file_info['permission']}</p>
-                <p>Encryption: <span class='{file_info['encryption_method'].lower()}-badge encryption-badge'>{file_info['encryption_method']}</span></p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # File actions
-            if st.button(f"View {file_id}", key=f"view_shared_{file_id}"):
-                # Get file from owner's storage
-                owner = file_info['owner']
-                owner_file_info = st.session_state.users[owner]['files'][file_id]
-                
-                # Decrypt and view file
-                try:
-                    encrypted_data = owner_file_info['data']
-                    decrypted_data = decrypt_file(
-                        encrypted_data,
-                        owner_file_info['encryption_info'],
-                        owner_file_info['encryption_method']
-                    )
-                    
-                    # Log the access
-                    log_file_access(file_id, st.session_state.username, 'view')
-                    
-                    # Create download link
-                    b64 = base64.b64encode(decrypted_data).decode()
-                    href = f'<a href="data:application/octet-stream;base64,{b64}" download="{file_info["filename"]}">Click to download</a>'
-                    st.markdown(href, unsafe_allow_html=True)
-                    
-                except Exception as e:
-                    st.error(f"Error viewing file: {str(e)}")
-
-def render_upload_file():
-    """Render the file upload section"""
-    st.markdown("## Upload File")
-    
-    uploaded_file = st.file_uploader("Choose a file", type=None)
-    
-    if uploaded_file is not None:
-        # Read file data
-        file_data = uploaded_file.read()
-        
-        # Analyze file for encryption
-        encryption_method, reason, probabilities = analyze_file_for_encryption(file_data, uploaded_file.name)
-        
-        # Display encryption recommendation
-        st.markdown("### AI Encryption Analysis")
-        
-        st.markdown(f"""
-        <div style='background-color: white; padding: 20px; border-radius: 10px; margin-bottom: 20px;'>
-            <h4>Recommended Encryption: <span class='{encryption_method.lower()}-badge encryption-badge'>{encryption_method}</span></h4>
-            <p><strong>Reason:</strong> {reason}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Visualization of encryption probabilities
-        st.markdown("#### Encryption Method Probabilities")
-        
-        # Create DataFrame for visualization
-        df = pd.DataFrame({
-            'Method': list(probabilities.keys()),
-            'Probability': list(probabilities.values())
-        })
-        
-        # Create bar chart
-        fig, ax = plt.subplots(figsize=(10, 5))
-        bars = sns.barplot(x='Method', y='Probability', data=df, ax=ax)
-        
-        # Add percentage labels on top of bars
-        for i, p in enumerate(bars.patches):
-            height = p.get_height()
-            ax.text(p.get_x() + p.get_width()/2., height + 0.01,
-                    f'{height:.1%}',
-                    ha="center", fontsize=10)
-        
-        ax.set_ylim(0, 1.1)
-        ax.set_title('Encryption Method Probabilities')
-        ax.set_ylabel('Probability')
-        st.pyplot(fig)
-        
-        # Allow user to override encryption method
-        selected_method = st.selectbox(
-            "Select encryption method",
-            ['AES', 'RSA', 'Kyber', 'NTRU'],
-            index=['AES', 'RSA', 'Kyber', 'NTRU'].index(encryption_method)
-        )
-        
-        # Upload button
-        if st.button("Upload and Encrypt"):
-            # Generate file ID
-            file_id = f"file_{st.session_state.file_counter}"
-            st.session_state.file_counter += 1
-            
-            # Encrypt file
-            encrypted_data, encryption_info = encrypt_file(file_data, selected_method, file_id)
-            
-            # Create Merkle tree for integrity verification
-            merkle_root = create_merkle_tree(file_data, file_id)
-            
-            # Store file information
-            st.session_state.users[st.session_state.username]['files'][file_id] = {
-                'filename': uploaded_file.name,
-                'upload_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                'size': len(file_data),
-                'encryption_method': selected_method,
-                'encryption_info': encryption_info,
-                'data': encrypted_data,
-                'merkle_root': merkle_root
-            }
-            
-            # Log the access
-            log_file_access(file_id, st.session_state.username, 'upload')
-            
-            st.success(f"File uploaded and encrypted successfully with {selected_method}!")
-            st.markdown(f"File ID: {file_id}")
-
-def render_file_permissions():
-    """Render the file permissions management section"""
-    st.markdown("## File Permissions")
-    
-    # Simplified permission management
-    st.markdown("### Manage File Permissions")
-    
-    # Get user files
-    user_files = st.session_state.users[st.session_state.username]['files']
-    
-    if not user_files:
-        st.info("You haven't uploaded any files yet.")
-        return
-    
-    # File selection
-    file_options = {f"{file_id}: {info['filename']}" for file_id, info in user_files.items()}
-    selected_file = st.selectbox("Select a file", list(file_options), label_visibility="visible")
-    
-    if selected_file:
-        file_id = selected_file.split(":")[0].strip()
-        
-        # User selection
-        other_users = [user for user in st.session_state.users.keys() if user != st.session_state.username]
-        if not other_users:
-            st.warning("No other users to share with.")
-            return
-            
-        target_user = st.selectbox("Select user to share with", other_users)
-        
-        # Permission selection
-        permission = st.selectbox("Select permission level", ["read", "write", "full"])
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("Grant Permission"):
-                # Create command
-                command = f"grant {permission} access to {target_user} for file {file_id}"
-                parsed = parse_nlp_permission(command, st.session_state.username)
-                success, message = apply_permission(parsed, st.session_state.username)
-                
-                if success:
-                    st.success(message)
-                    # Log the access
-                    log_file_access(file_id, st.session_state.username, 'share')
-                else:
-                    st.error(message)
-        
-        with col2:
-            if st.button("Revoke Permission"):
-                # Create command
-                command = f"revoke access from {target_user} for file {file_id}"
-                parsed = parse_nlp_permission(command, st.session_state.username)
-                success, message = apply_permission(parsed, st.session_state.username)
-                
-                if success:
-                    st.success(message)
-                else:
-                    st.error(message)
-    
-    # Display current permissions
-    st.markdown("### Current Permissions")
-    
-    for file_id, file_info in user_files.items():
-        st.markdown(f"""
-        <div style='background-color: white; padding: 15px; border-radius: 10px; margin-bottom: 15px;'>
-            <h4>{file_info['filename']} (ID: {file_id})</h4>
-        """, unsafe_allow_html=True)
-        
-        # Get permissions for this file
-        file_permissions = st.session_state.nlp_permissions.get(file_id, {})
-        
-        if file_permissions:
-            st.markdown("<table style='width: 100%;'>", unsafe_allow_html=True)
-            st.markdown("<tr><th>User</th><th>Permission</th></tr>", unsafe_allow_html=True)
-            
-            for user, permission in file_permissions.items():
-                st.markdown(f"""
-                <tr>
-                    <td>{user}</td>
-                    <td>{permission}</td>
-                </tr>
-                """, unsafe_allow_html=True)
-            
-            st.markdown("</table>", unsafe_allow_html=True)
-        else:
-            st.markdown("<p>No permissions set for this file.</p>", unsafe_allow_html=True)
-        
-        st.markdown("</div>", unsafe_allow_html=True)
-def render_settings():
-    """Render the settings section"""
-    st.markdown("## Settings")
-    
-    # Entropy collection
-    st.markdown("### Entropy Collection")
-    st.markdown("""
-    Move your mouse randomly in the box below to generate entropy for stronger encryption keys.
-    This simulates collecting randomness from browser events.
-    """)
-    
-    # Create a canvas for mouse movement
-    st.markdown("""
-    <div id="entropy-canvas" style="width: 100%; height: 200px; background-color: #f0f2f6; border-radius: 10px; position: relative;">
-        <div id="entropy-pointer" style="width: 10px; height: 10px; background-color: #4e8df5; border-radius: 50%; position: absolute; top: 50%; left: 50%;"></div>
-    </div>
-    <script>
-        const canvas = document.getElementById('entropy-canvas');
-        const pointer = document.getElementById('entropy-pointer');
-        
-        canvas.addEventListener('mousemove', function(e) {
-            const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            
-            pointer.style.left = x + 'px';
-            pointer.style.top = y + 'px';
-            
-            // In a real app, we would send this data to the server
-            console.log('Entropy collected:', x, y, Date.now());
-        });
-    </script>
-    """, unsafe_allow_html=True)
-    
-    # Simulate entropy collection
-    if st.button("Simulate Entropy Collection"):
-        # Generate random mouse movements
-        for _ in range(100):
-            x = random.randint(0, 100)
-            y = random.randint(0, 100)
-            timestamp = time.time()
-            collect_entropy(f"{x},{y},{timestamp}")
-        
-        st.success(f"Collected 100 entropy samples. Total pool size: {len(st.session_state.entropy_pool)}")
-    
-    # Quantum key simulation
-    st.markdown("### Quantum Key Simulation")
-    st.markdown("""
-    This section simulates quantum computing-based key generation using qubits.
-    In a real quantum computer, qubits can exist in multiple states simultaneously due to superposition.
-    """)
-    
-    if st.button("Simulate Qubit Key Generation"):
-        # Generate a sample key
-        key = simulate_qubit_key_generation("demo", 16)
-        key_hex = key.hex()
-        
-        # Visualize the key as qubits
-        st.markdown("#### Simulated Qubit States")
-        
-        # Convert key to binary representation
-        key_bin = ''.join(format(byte, '08b') for byte in key[:8])  # Show first 8 bytes
-        
-        # Display as a grid of qubits
-        cols = st.columns(8)
-        for i, col in enumerate(cols):
-            with col:
-                st.markdown(f"**Qubit {i+1}**")
-                for j in range(8):
-                    idx = i*8 + j
-                    if idx < len(key_bin):
-                        bit = key_bin[idx]
-                        color = "#4e8df5" if bit == "1" else "#f5f7f9"
-                        st.markdown(f"""
-                        <div style="width: 30px; height: 30px; border-radius: 50%; background-color: {color}; 
-                                    margin: 5px auto; display: flex; justify-content: center; align-items: center;
-                                    color: white; font-weight: bold;">
-                            {bit}
-                        </div>
-                        """, unsafe_allow_html=True)
-        
-        st.markdown(f"**Generated Key (Hex):** `{key_hex}`")
+        # Display different sections based on navigation
+        if app_mode == "Dashboard":
+            render_dashboard()
+        elif app_mode == "My Files":
+            render_my_files()
+        elif app_mode == "Shared Files":
+            render_shared_files()
+        elif app_mode == "Upload File":
+            render_upload_file()
+        elif app_mode == "File Permissions":
+            render_file_permissions()
+        elif app_mode == "Analytics":
+            render_analytics()
+        elif app_mode == "Settings":
+            render_settings()
 
 # ================ MAIN APPLICATION LOGIC ================
 
 def main():
     """Main application entry point"""
+    # Load custom CSS
+    load_custom_css()
+    
     # Check if user is logged in
     if not st.session_state.logged_in:
         login_page()
