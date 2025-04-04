@@ -1187,8 +1187,8 @@ def render_file_permissions():
                         except Exception as e:
                             st.error(f"Error downloading file: {str(e)}")
     def render_analytics():
-    """Render the analytics and insights section"""
-    st.markdown("## Analytics & Insights")
+    
+     st.markdown("## Analytics & Insights")
     
     # Get user's files
     user_files = st.session_state.users[st.session_state.username]["files"]
