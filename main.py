@@ -15,8 +15,8 @@ from cryptography.hazmat.primitives import hashes, padding
 from cryptography.hazmat.primitives.asymmetric import rsa, padding as asym_padding
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
-import torch
-import torch.nn as nn
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import serialization
 from datetime import datetime, timedelta
 from PIL import Image
 import io
@@ -36,6 +36,23 @@ import asyncio
 import aiohttp
 from dataclasses import dataclass
 from enum import Enum
+
+# Try to import torch, but make it optional
+try:
+    import torch
+    import torch.nn as nn
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
+    # Create dummy classes/functions if needed
+    class DummyNN:
+        class Module:
+            pass
+    class DummyTorch:
+        nn = DummyNN
+    torch = DummyTorch
+
+# ... rest of your code ...
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -296,7 +313,79 @@ def load_custom_css():
     """, unsafe_allow_html=True)
 
 # ================ SECURITY FUNCTIONS ================
+# ... existing code ...
 
+def login_page():
+    """Render the login page"""
+    st.markdown("<div class='login-container'>", unsafe_allow_html=True)
+    st.markdown("<h2 style='text-align: center;'>CipherCloud Login</h2>", unsafe_allow_html=True)
+    
+    # Login form
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("Login"):
+            if username and password:
+                # Collect entropy from login attempt
+                collect_entropy(f"{username}_{time.time()}")
+                
+                # Verify login
+                success, message = verify_login(username, password)
+                
+                if success:
+                    st.session_state.logged_in = True
+                    st.session_state.username = username
+                    st.rerun()
+                else:
+                    st.error(message)
+            else:
+                st.error("Please enter both username and password")
+    
+    with col2:
+        if st.button("Register"):
+            if username and password:
+                if username in st.session_state.users:
+                    st.error("Username already exists")
+                else:
+                    # Check password strength
+                    strength = check_password_strength(password)
+                    
+                    if strength['score'] < 40:
+                        st.warning(f"Password strength: {strength['level']} ({strength['score']}/100)")
+                        st.markdown("<ul>", unsafe_allow_html=True)
+                        for feedback in strength['feedback']:
+                            st.markdown(f"<li>{feedback}</li>", unsafe_allow_html=True)
+                        st.markdown("</ul>", unsafe_allow_html=True)
+                        
+                        # Allow override with confirmation
+                        if st.button("Use Weak Password Anyway"):
+                            create_new_user(username, password)
+                            st.success("Account created successfully! You can now login.")
+                    else:
+                        create_new_user(username, password)
+                        st.success("Account created successfully! You can now login.")
+            else:
+                st.error("Please enter both username and password")
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+
+def create_new_user(username, password):
+    """Create a new user account"""
+    st.session_state.users[username] = {
+        "password": password,
+        "files": {},
+        "shared_files": {},
+        "access_history": [],
+        "score": 50  # Default score for new users
+    }
+    
+    # Log user creation
+    log_security_event(username, "user_created", "New user account created")
+
+# ... existing code ...
 def generate_secure_key(length=32):
     """Generate a secure key using entropy pool"""
     if not st.session_state.entropy_pool:
