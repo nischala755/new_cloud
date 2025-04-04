@@ -314,7 +314,70 @@ def load_custom_css():
 
 # ================ SECURITY FUNCTIONS ================
 # ... existing code ...
-
+def render_shared_files():
+    """Render the shared files section"""
+    st.markdown("## Shared Files")
+    
+    # Check if user has any shared files
+    if not st.session_state.users[st.session_state.username]["shared_files"]:
+        st.info("No files have been shared with you yet.")
+        return
+    
+    # Display shared files in a grid
+    shared_files = st.session_state.users[st.session_state.username]["shared_files"]
+    
+    # Create columns for the grid
+    cols = st.columns(3)
+    
+    for i, (file_id, file_info) in enumerate(shared_files.items()):
+        with cols[i % 3]:
+            st.markdown(f"""
+            <div class="file-card">
+                <h3>{file_info['filename']}</h3>
+                <p>Shared by: {file_info['shared_by']}</p>
+                <p>Encryption: <span class="{file_info['encryption'].lower()}-badge encryption-badge">{file_info['encryption']}</span></p>
+                <p>Shared on: {file_info['shared_date']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Download button
+            if st.button(f"Download {file_info['filename']}", key=f"download_shared_{file_id}"):
+                try:
+                    # Decrypt the file
+                    decrypted_data = decrypt_file(
+                        file_info['encrypted_data'],
+                        file_info['encryption_info'],
+                        file_info['encryption']
+                    )
+                    
+                    # Create download link
+                    b64 = base64.b64encode(decrypted_data).decode()
+                    mime_type = "application/octet-stream"
+                    href = f'<a href="data:{mime_type};base64,{b64}" download="{file_info["filename"]}">Download {file_info["filename"]}</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+                    
+                    # Log access
+                    log_security_event(
+                        st.session_state.username,
+                        "file_access",
+                        f"Downloaded shared file: {file_info['filename']}"
+                    )
+                    
+                    # Update access history
+                    st.session_state.users[st.session_state.username]["access_history"].append({
+                        "file_id": file_id,
+                        "action": "download",
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    })
+                    
+                except Exception as e:
+                    st.error(f"Error downloading file: {str(e)}")
+            
+            # File details button
+            if st.button(f"Details", key=f"details_shared_{file_id}"):
+                st.session_state.selected_file = file_id
+                st.session_state.selected_file_type = "shared"
+                st.rerun()
 def login_page():
     """Render the login page"""
     st.markdown("<div class='login-container'>", unsafe_allow_html=True)
